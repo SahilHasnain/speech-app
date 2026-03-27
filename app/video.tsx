@@ -36,7 +36,8 @@ export default function VideoScreen() {
     const [videoDuration, setVideoDuration] = React.useState(0);
     const [videoPosition, setVideoPosition] = React.useState(0);
     const [isRepeatEnabled, setIsRepeatEnabled] = React.useState(false);
-    const [hasRestoredProgress, setHasRestoredProgress] = React.useState(false);
+    const [savedProgress, setSavedProgress] = React.useState<{ progress: number; duration: number } | null>(null);
+    const [showResumeButton, setShowResumeButton] = React.useState(false);
     const lastSavedProgressRef = React.useRef<number>(0);
     const playerRef = React.useRef<any>(null);
 
@@ -77,7 +78,8 @@ export default function VideoScreen() {
         setIsLoading(true);
         setVideoPosition(0);
         setVideoPlaying(true);
-        setHasRestoredProgress(false);
+        setSavedProgress(null);
+        setShowResumeButton(false);
 
         const loadingTimeout = setTimeout(() => {
             if (isLoading) {
@@ -90,35 +92,33 @@ export default function VideoScreen() {
         };
     }, [videoUrl]);
 
-    // Restore saved progress when video is ready
+    // Check for saved progress when video is ready
     React.useEffect(() => {
-        const restoreProgress = async () => {
-            if (!speechId || hasRestoredProgress || !playerRef.current || videoDuration === 0) {
+        const checkSavedProgress = async () => {
+            if (!speechId || !playerRef.current || videoDuration === 0) {
                 return;
             }
 
             try {
-                const savedProgress = await getProgress(speechId);
-                if (savedProgress && savedProgress.progress > 0) {
-                    // Only restore if progress is between 5% and 95%
-                    const percentage = (savedProgress.progress / savedProgress.duration) * 100;
+                const progress = await getProgress(speechId);
+                if (progress && progress.progress > 0) {
+                    // Only show resume button if progress is between 5% and 95%
+                    const percentage = (progress.progress / progress.duration) * 100;
                     if (percentage >= 5 && percentage <= 95) {
-                        await playerRef.current.seekTo(savedProgress.progress, true);
-                        setVideoPosition(savedProgress.progress);
-                        setHasRestoredProgress(true);
-                        console.log(`Restored progress: ${savedProgress.progress}s (${percentage.toFixed(1)}%)`);
+                        setSavedProgress(progress);
+                        setShowResumeButton(true);
+                        console.log(`Found saved progress: ${progress.progress}s (${percentage.toFixed(1)}%)`);
                     }
                 }
             } catch (error) {
-                console.error("Failed to restore progress:", error);
+                console.error("Failed to check saved progress:", error);
             }
         };
 
-        if (videoDuration > 0 && !hasRestoredProgress) {
-            // Wait a bit for player to be fully ready
-            setTimeout(restoreProgress, 1000);
+        if (videoDuration > 0 && !savedProgress) {
+            setTimeout(checkSavedProgress, 500);
         }
-    }, [speechId, videoDuration, hasRestoredProgress]);
+    }, [speechId, videoDuration, savedProgress]);
 
     // Handle fullscreen changes
     const handleFullscreenChange = async (isFullscreen: boolean) => {
@@ -266,6 +266,23 @@ export default function VideoScreen() {
         setIsRepeatEnabled(!isRepeatEnabled);
     };
 
+    const handleResumeProgress = async () => {
+        if (savedProgress && playerRef.current) {
+            try {
+                await playerRef.current.seekTo(savedProgress.progress, true);
+                setVideoPosition(savedProgress.progress);
+                setShowResumeButton(false);
+                console.log(`Resumed to ${savedProgress.progress}s`);
+            } catch (error) {
+                console.error("Failed to resume progress:", error);
+            }
+        }
+    };
+
+    const handleDismissResume = () => {
+        setShowResumeButton(false);
+    };
+
     return (
         <>
             <StatusBar
@@ -347,6 +364,76 @@ export default function VideoScreen() {
 
                             {/* Custom Video Controls */}
                             <View className="px-6 pb-24 bg-black">
+                                {/* Resume Progress Button */}
+                                {showResumeButton && savedProgress && (
+                                    <View className="mb-4">
+                                        <View
+                                            className="p-4 rounded-xl flex-row items-center justify-between"
+                                            style={{ backgroundColor: colors.accent.secondary }}
+                                        >
+                                            <View className="flex-1 mr-3">
+                                                <Text
+                                                    className="text-sm font-semibold mb-1"
+                                                    style={{ color: colors.text.primary }}
+                                                >
+                                                    Continue watching?
+                                                </Text>
+                                                <Text
+                                                    className="text-xs"
+                                                    style={{ color: colors.text.secondary }}
+                                                >
+                                                    Resume from {formatTime(savedProgress.progress)}
+                                                </Text>
+                                            </View>
+                                            <View className="flex-row gap-2">
+                                                <Pressable
+                                                    onPress={handleDismissResume}
+                                                    className="px-3 py-2 rounded-lg"
+                                                    style={{
+                                                        backgroundColor: colors.background.tertiary,
+                                                        minHeight: 36,
+                                                        minWidth: 36,
+                                                        justifyContent: 'center',
+                                                        alignItems: 'center'
+                                                    }}
+                                                    accessibilityRole="button"
+                                                    accessibilityLabel="Dismiss resume"
+                                                >
+                                                    <Ionicons
+                                                        name="close"
+                                                        size={18}
+                                                        color={colors.text.secondary}
+                                                    />
+                                                </Pressable>
+                                                <Pressable
+                                                    onPress={handleResumeProgress}
+                                                    className="px-4 py-2 rounded-lg flex-row items-center gap-1"
+                                                    style={{
+                                                        backgroundColor: colors.accent.primary,
+                                                        minHeight: 36,
+                                                        justifyContent: 'center',
+                                                        alignItems: 'center'
+                                                    }}
+                                                    accessibilityRole="button"
+                                                    accessibilityLabel="Resume playback"
+                                                >
+                                                    <Ionicons
+                                                        name="play"
+                                                        size={16}
+                                                        color={colors.text.primary}
+                                                    />
+                                                    <Text
+                                                        className="text-sm font-semibold"
+                                                        style={{ color: colors.text.primary }}
+                                                    >
+                                                        Resume
+                                                    </Text>
+                                                </Pressable>
+                                            </View>
+                                        </View>
+                                    </View>
+                                )}
+
                                 {/* Progress Bar */}
                                 <View className="mb-4">
                                     <Slider

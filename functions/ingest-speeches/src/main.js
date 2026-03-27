@@ -175,56 +175,6 @@ async function fetchYouTubePlaylistVideos(playlistId, apiKey, maxResults = 5000,
 }
 
 /**
- * Fetches shorts video IDs from UUSH playlist (undocumented YouTube feature)
- */
-async function getShortsVideoIds(channelId, apiKey, log) {
-  const baseUrl = "https://www.googleapis.com/youtube/v3";
-  const shortsPlaylistId = channelId.replace('UC', 'UUSH');
-  const shortsIds = new Set();
-  
-  try {
-    log(`Fetching shorts playlist (${shortsPlaylistId})...`);
-    let pageToken = null;
-    let totalShorts = 0;
-    
-    do {
-      let playlistUrl = `${baseUrl}/playlistItems?part=contentDetails&playlistId=${shortsPlaylistId}&maxResults=50&key=${apiKey}`;
-      
-      if (pageToken) {
-        playlistUrl += `&pageToken=${pageToken}`;
-      }
-      
-      const response = await fetch(playlistUrl);
-      
-      if (!response.ok) {
-        // Shorts playlist might not exist for this channel
-        log(`No shorts playlist found (this is normal if channel has no shorts)`);
-        break;
-      }
-      
-      const data = await response.json();
-      
-      if (data.items && data.items.length > 0) {
-        data.items.forEach(item => {
-          shortsIds.add(item.contentDetails.videoId);
-        });
-        totalShorts += data.items.length;
-      }
-      
-      pageToken = data.nextPageToken;
-    } while (pageToken);
-    
-    if (totalShorts > 0) {
-      log(`Found ${totalShorts} shorts to exclude`);
-    }
-  } catch (error) {
-    log(`Could not fetch shorts playlist: ${error.message}`);
-  }
-  
-  return shortsIds;
-}
-
-/**
  * Fetches videos from a YouTube channel
  */
 async function fetchYouTubeVideos(channelId, apiKey, maxResults = 5000, log) {
