@@ -131,6 +131,117 @@ async function getShortsVideoIds(channelId) {
   return shortsIds;
 }
 
+// Fetch videos from YouTube playlist
+async function fetchYouTubePlaylistVideos(playlistId, maxResults = 5000) {
+  const baseUrl = "https://www.googleapis.com/youtube/v3";
+
+  try {
+    // Fetch videos from the playlist with pagination
+    const allVideoItems = [];
+    let pageToken = null;
+    const perPage = 50;
+
+    console.log(`   Fetching videos (limit: ${maxResults === Infinity ? 'all' : maxResults})...`);
+
+    while (maxResults === Infinity || allVideoItems.length < maxResults) {
+      let playlistUrl = `${baseUrl}/playlistItems?part=snippet,contentDetails&playlistId=${playlistId}&maxResults=${perPage}&key=${config.youtubeApiKey}`;
+
+      if (pageToken) {
+        playlistUrl += `&pageToken=${pageToken}`;
+      }
+
+      const playlistResponse = await fetch(playlistUrl);
+
+      if (!playlistResponse.ok) {
+        throw new Error(
+          `YouTube API error: ${playlistResponse.status} ${playlistResponse.statusText}`,
+        );
+      }
+
+      const playlistData = await playlistResponse.json();
+
+      if (!playlistData.items || playlistData.items.length === 0) {
+        break;
+      }
+
+      allVideoItems.push(...playlistData.items);
+      
+      if (maxResults !== Infinity) {
+        console.log(`   Fetched ${Math.min(allVideoItems.length, maxResults)} / ${maxResults} videos...`);
+      } else {
+        console.log(`   Fetched ${allVideoItems.length} videos...`);
+      }
+
+      pageToken = playlistData.nextPageToken;
+
+      if (!pageToken) {
+        break;
+      }
+      
+      if (maxResults !== Infinity && allVideoItems.length >= maxResults) {
+        break;
+      }
+    }
+
+    if (allVideoItems.length === 0) {
+      return { channelId: playlistId, channelName: "Unknown Playlist", videos: [] };
+    }
+
+    const limitedVideoItems = maxResults === Infinity ? allVideoItems : allVideoItems.slice(0, maxResults);
+
+    // Fetch video details in batches
+    const allVideosData = [];
+    const batchSize = 50;
+
+    for (let i = 0; i < limitedVideoItems.length; i += batchSize) {
+      const batch = limitedVideoItems.slice(i, i + batchSize);
+      const videoIds = batch
+        .map((item) => item.contentDetails.videoId)
+        .join(",");
+
+      const videosResponse = await fetch(
+        `${baseUrl}/videos?part=contentDetails,snippet,statistics&id=${videoIds}&key=${config.youtubeApiKey}`,
+      );
+
+      if (!videosResponse.ok) {
+        throw new Error(
+          `YouTube API error: ${videosResponse.status} ${videosResponse.statusText}`,
+        );
+      }
+
+      const videosData = await videosResponse.json();
+      allVideosData.push(...videosData.items);
+
+      console.log(`   Processed details for ${allVideosData.length} videos...`);
+    }
+
+    // Transform to our format
+    const videos = allVideosData.map((video) => ({
+      youtubeId: video.id,
+      title: video.snippet.title,
+      thumbnailUrl:
+        video.snippet.thumbnails.high?.url ||
+        video.snippet.thumbnails.medium?.url ||
+        video.snippet.thumbnails.default?.url,
+      duration: parseDuration(video.contentDetails.duration),
+      uploadDate: video.snippet.publishedAt,
+      views: parseInt(video.statistics?.viewCount || "0", 10),
+      description: video.snippet.description || "",
+    }));
+
+    // Get playlist name
+    const playlistResponse = await fetch(
+      `${baseUrl}/playlists?part=snippet&id=${playlistId}&key=${config.youtubeApiKey}`,
+    );
+    const playlistData = await playlistResponse.json();
+    const channelName = playlistData.items?.[0]?.snippet?.title || "Unknown Playlist";
+
+    return { channelId: playlistId, channelName, videos };
+  } catch (error) {
+    throw new Error(`Failed to fetch YouTube playlist videos: ${error.message}`);
+  }
+}
+
 // Fetch videos from YouTube channel
 async function fetchYouTubeVideos(channelId, maxResults = 5000) {
   const baseUrl = "https://www.googleapis.com/youtube/v3";
@@ -360,33 +471,30 @@ async function updateSpeechViews(databases, documentId, newViews) {
   }
 }
 
-// Process a single channel
-async function ingestChannelSpeeches(databases, existingMap, channelId, maxResults = 5000) {
-  console.log(`\n📺 Processing channel: ${channelId}`);
-  console.log("   Fetching videos from YouTube...");
+// Process a single source (channel or playlist)
+async function ingestSourceSpeeches(databases, existingMap, source, maxResults = 5000) {
+  const sourceType = source.type || "channel";
+  const sourceId = source.youtubeChannelId;
+  const sourceName = source.name;
+  
+  console.log(`\n📺 Processing ${sourceType}: ${sourceId}`);
+  console.log(`   Fetching videos from YouTube...`);
 
-  const channelData = await fetchYouTubeVideos(channelId, maxResults);
-  const { channelName, videos } = channelData;
+  let sourceData;
+  if (sourceType === "playlist") {
+    sourceData = await fetchYouTubePlaylistVideos(sourceId, maxResults);
+  } else {
+    sourceData = await fetchYouTubeVideos(sourceId, maxResults);
+  }
+  
+  const { channelName, videos } = sourceData;
 
-  console.log(`   ✅ Found ${videos.length} videos for channel: ${channelName}`);
+  console.log(`   ✅ Found ${videos.length} videos for ${sourceType}: ${channelName}`);
 
-  // Fetch channel document to check ignoreDuration setting
-  let ignoreDuration = false;
-  try {
-    const channelDocs = await databases.listDocuments(
-      config.databaseId,
-      config.channelsCollectionId,
-      [Query.equal("youtubeChannelId", channelId), Query.limit(1)],
-    );
-    
-    if (channelDocs.documents.length > 0) {
-      ignoreDuration = channelDocs.documents[0].ignoreDuration || false;
-      if (ignoreDuration) {
-        console.log(`   ⚙️  ignoreDuration is enabled for this channel`);
-      }
-    }
-  } catch (error) {
-    console.log(`   ⚠️  Could not fetch channel settings: ${error.message}`);
+  // Check ignoreDuration setting
+  const ignoreDuration = source.ignoreDuration || false;
+  if (ignoreDuration) {
+    console.log(`   ⚙️  ignoreDuration is enabled for this ${sourceType}`);
   }
 
   let newCount = 0;
@@ -456,8 +564,8 @@ async function ingestChannelSpeeches(databases, existingMap, channelId, maxResul
   }
 
   return {
-    channelId,
-    channelName,
+    channelId: sourceId,
+    channelName: sourceName,
     newCount,
     updatedCount,
     unchangedCount,
@@ -508,17 +616,17 @@ async function ingestSpeeches() {
     const existingMap = await getAllExistingSpeeches(databases);
     console.log(`✅ Found ${existingMap.size} existing speeches in database`);
 
-    // Process each channel
-    const channelResults = [];
-    for (const channelId of channelIds) {
+    // Process each source
+    const sourceResults = [];
+    for (const source of sources.documents) {
       try {
-        const result = await ingestChannelSpeeches(databases, existingMap, channelId, maxResults);
-        channelResults.push(result);
+        const result = await ingestSourceSpeeches(databases, existingMap, source, maxResults);
+        sourceResults.push(result);
       } catch (error) {
-        console.error(`\n❌ Error processing channel ${channelId}:`, error.message);
-        channelResults.push({
-          channelId,
-          channelName: "Unknown",
+        console.error(`\n❌ Error processing source ${source.youtubeChannelId}:`, error.message);
+        sourceResults.push({
+          channelId: source.youtubeChannelId,
+          channelName: source.name || "Unknown",
           newCount: 0,
           updatedCount: 0,
           unchangedCount: 0,
@@ -530,12 +638,12 @@ async function ingestSpeeches() {
       }
     }
 
-    // Print per-channel statistics
+    // Print per-source statistics
     console.log("\n" + "=".repeat(60));
-    console.log("📊 Per-Channel Statistics:");
+    console.log("📊 Per-Source Statistics:");
     console.log("=".repeat(60));
 
-    for (const result of channelResults) {
+    for (const result of sourceResults) {
       console.log(`\n📺 ${result.channelName} (${result.channelId}):`);
       if (result.error) {
         console.log(`   ❌ Error: ${result.error}`);
@@ -550,17 +658,17 @@ async function ingestSpeeches() {
     }
 
     // Print overall summary
-    const totalNew = channelResults.reduce((sum, r) => sum + r.newCount, 0);
-    const totalUpdated = channelResults.reduce((sum, r) => sum + r.updatedCount, 0);
-    const totalUnchanged = channelResults.reduce((sum, r) => sum + r.unchangedCount, 0);
-    const totalErrors = channelResults.reduce((sum, r) => sum + r.errorCount, 0);
-    const totalFilteredDuration = channelResults.reduce((sum, r) => sum + r.filteredDurationCount, 0);
-    const totalVideos = channelResults.reduce((sum, r) => sum + r.totalVideos, 0);
+    const totalNew = sourceResults.reduce((sum, r) => sum + r.newCount, 0);
+    const totalUpdated = sourceResults.reduce((sum, r) => sum + r.updatedCount, 0);
+    const totalUnchanged = sourceResults.reduce((sum, r) => sum + r.unchangedCount, 0);
+    const totalErrors = sourceResults.reduce((sum, r) => sum + r.errorCount, 0);
+    const totalFilteredDuration = sourceResults.reduce((sum, r) => sum + r.filteredDurationCount, 0);
+    const totalVideos = sourceResults.reduce((sum, r) => sum + r.totalVideos, 0);
 
     console.log("\n" + "=".repeat(60));
     console.log("📊 Overall Summary:");
     console.log("=".repeat(60));
-    console.log(`   📺 Channels processed: ${channelResults.length}`);
+    console.log(`   📺 Sources processed: ${sourceResults.length}`);
     console.log(`   📹 Total videos processed: ${totalVideos}`);
     console.log(`   ✅ New speeches added: ${totalNew}`);
     console.log(`   🔄 Speeches updated: ${totalUpdated}`);

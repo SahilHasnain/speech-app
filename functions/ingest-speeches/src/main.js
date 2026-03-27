@@ -18,6 +18,164 @@ import { Client, Databases, ID, Query } from "node-appwrite";
 
 /**
  * Fetches shorts video IDs from UUSH playlist (undocumented YouTube feature)
+ * @param {string} channelId - YouTube channel ID
+ * @param {string} apiKey - YouTube API key
+ * @param {Function} log - Logging function
+ * @returns {Promise<Set>} Set of shorts video IDs
+ */
+async function getShortsVideoIds(channelId, apiKey, log) {
+  const baseUrl = "https://www.googleapis.com/youtube/v3";
+  const shortsPlaylistId = channelId.replace('UC', 'UUSH');
+  const shortsIds = new Set();
+  
+  try {
+    log(`Fetching shorts playlist (${shortsPlaylistId})...`);
+    let pageToken = null;
+    let totalShorts = 0;
+    
+    do {
+      let playlistUrl = `${baseUrl}/playlistItems?part=contentDetails&playlistId=${shortsPlaylistId}&maxResults=50&key=${apiKey}`;
+      
+      if (pageToken) {
+        playlistUrl += `&pageToken=${pageToken}`;
+      }
+      
+      const response = await fetch(playlistUrl);
+      
+      if (!response.ok) {
+        // Shorts playlist might not exist for this channel
+        log(`No shorts playlist found (this is normal if channel has no shorts)`);
+        break;
+      }
+      
+      const data = await response.json();
+      
+      if (data.items && data.items.length > 0) {
+        data.items.forEach(item => {
+          shortsIds.add(item.contentDetails.videoId);
+        });
+        totalShorts += data.items.length;
+      }
+      
+      pageToken = data.nextPageToken;
+    } while (pageToken);
+    
+    if (totalShorts > 0) {
+      log(`Found ${totalShorts} shorts to exclude`);
+    }
+  } catch (error) {
+    log(`Could not fetch shorts playlist: ${error.message}`);
+  }
+  
+  return shortsIds;
+}
+
+/**
+ * Fetches videos from a YouTube playlist using YouTube Data API v3
+ * @param {string} playlistId - YouTube playlist ID
+ * @param {string} apiKey - YouTube API key
+ * @param {number} maxResults - Maximum number of videos to fetch
+ * @param {Function} log - Logging function
+ * @returns {Promise<Object>} Object containing playlistId, playlistName, and videos array
+ */
+async function fetchYouTubePlaylistVideos(playlistId, apiKey, maxResults = 5000, log) {
+  const baseUrl = "https://www.googleapis.com/youtube/v3";
+
+  try {
+    // Fetch videos from the playlist with pagination
+    const allVideoItems = [];
+    let pageToken = null;
+    const perPage = 50;
+
+    while (allVideoItems.length < maxResults) {
+      let playlistUrl = `${baseUrl}/playlistItems?part=snippet,contentDetails&playlistId=${playlistId}&maxResults=${perPage}&key=${apiKey}`;
+
+      if (pageToken) {
+        playlistUrl += `&pageToken=${pageToken}`;
+      }
+
+      const playlistResponse = await fetch(playlistUrl);
+
+      if (!playlistResponse.ok) {
+        throw new Error(
+          `YouTube API error: ${playlistResponse.status} ${playlistResponse.statusText}`,
+        );
+      }
+
+      const playlistData = await playlistResponse.json();
+
+      if (!playlistData.items || playlistData.items.length === 0) {
+        break;
+      }
+
+      allVideoItems.push(...playlistData.items);
+
+      pageToken = playlistData.nextPageToken;
+
+      if (!pageToken) {
+        break;
+      }
+    }
+
+    if (allVideoItems.length === 0) {
+      return { channelId: playlistId, channelName: "Unknown Playlist", videos: [] };
+    }
+
+    const limitedVideoItems = allVideoItems.slice(0, maxResults);
+
+    // Fetch video details in batches
+    const allVideosData = [];
+    const batchSize = 50;
+
+    for (let i = 0; i < limitedVideoItems.length; i += batchSize) {
+      const batch = limitedVideoItems.slice(i, i + batchSize);
+      const videoIds = batch
+        .map((item) => item.contentDetails.videoId)
+        .join(",");
+
+      const videosResponse = await fetch(
+        `${baseUrl}/videos?part=contentDetails,snippet,statistics&id=${videoIds}&key=${apiKey}`,
+      );
+
+      if (!videosResponse.ok) {
+        throw new Error(
+          `YouTube API error: ${videosResponse.status} ${videosResponse.statusText}`,
+        );
+      }
+
+      const videosData = await videosResponse.json();
+      allVideosData.push(...videosData.items);
+    }
+
+    // Transform to our format
+    const videos = allVideosData.map((video) => ({
+      youtubeId: video.id,
+      title: video.snippet.title,
+      thumbnailUrl:
+        video.snippet.thumbnails.high?.url ||
+        video.snippet.thumbnails.medium?.url ||
+        video.snippet.thumbnails.default?.url,
+      duration: parseDuration(video.contentDetails.duration),
+      uploadDate: video.snippet.publishedAt,
+      views: parseInt(video.statistics?.viewCount || "0", 10),
+      description: video.snippet.description || "",
+    }));
+
+    // Get playlist name
+    const playlistResponse = await fetch(
+      `${baseUrl}/playlists?part=snippet&id=${playlistId}&key=${apiKey}`,
+    );
+    const playlistData = await playlistResponse.json();
+    const channelName = playlistData.items?.[0]?.snippet?.title || "Unknown Playlist";
+
+    return { channelId: playlistId, channelName, videos };
+  } catch (error) {
+    throw new Error(`Failed to fetch YouTube playlist videos: ${error.message}`);
+  }
+}
+
+/**
+ * Fetches shorts video IDs from UUSH playlist (undocumented YouTube feature)
  */
 async function getShortsVideoIds(channelId, apiKey, log) {
   const baseUrl = "https://www.googleapis.com/youtube/v3";
@@ -338,41 +496,57 @@ async function getAllChannels(databases, databaseId, channelsCollectionId, log) 
 }
 
 /**
- * Processes speeches for a single channel
+ * Processes speeches for a single source (channel or playlist)
  */
-async function processChannel(
+async function processSource(
   databases,
   databaseId,
   collectionId,
   existingMap,
-  channel,
+  source,
   youtubeApiKey,
   log,
   logError,
 ) {
-  const channelName = channel.name;
-  const channelId = channel.youtubeChannelId;
-  const ignoreDuration = channel.ignoreDuration || false;
+  const sourceType = source.type || "channel";
+  const sourceName = source.name;
+  const sourceId = source.youtubeChannelId;
+  const ignoreDuration = source.ignoreDuration || false;
 
-  log(`Processing channel: ${channelName}`);
+  log(`Processing ${sourceType}: ${sourceName}`);
   
   if (ignoreDuration) {
-    log(`ignoreDuration is enabled for this channel`);
+    log(`ignoreDuration is enabled for this ${sourceType}`);
   }
 
   try {
-    const { videos } = await fetchYouTubeVideos(
-      channelId,
-      youtubeApiKey,
-      5000,
-      log,
-    );
+    let fetchedData;
+    
+    // Fetch videos based on source type
+    if (sourceType === "playlist") {
+      fetchedData = await fetchYouTubePlaylistVideos(
+        sourceId,
+        youtubeApiKey,
+        5000,
+        log,
+      );
+    } else {
+      fetchedData = await fetchYouTubeVideos(
+        sourceId,
+        youtubeApiKey,
+        5000,
+        log,
+      );
+    }
 
-    log(`Found ${videos.length} videos for channel: ${channelName}`);
+    const { videos } = fetchedData;
+
+    log(`Found ${videos.length} videos for ${sourceType}: ${sourceName}`);
 
     const results = {
-      channelId,
-      channelName,
+      sourceId,
+      sourceName,
+      sourceType,
       processed: videos.length,
       added: 0,
       updated: 0,
@@ -427,8 +601,8 @@ async function processChannel(
             databaseId,
             collectionId,
             video,
-            channelName,
-            channelId,
+            sourceName,
+            sourceId,
           );
 
           log(`Added new speech: ${video.title} (${video.youtubeId})`);
@@ -443,10 +617,11 @@ async function processChannel(
 
     return results;
   } catch (error) {
-    logError(`Error processing channel ${channelId}: ${error.message}`);
+    logError(`Error processing ${sourceType} ${sourceId}: ${error.message}`);
     return {
-      channelId,
-      channelName,
+      sourceId,
+      sourceName,
+      sourceType,
       processed: 0,
       added: 0,
       updated: 0,

@@ -22,6 +22,8 @@ export interface Channel {
   youtubeChannelId: string;
   thumbnailUrl?: string;
   description?: string;
+  type: "channel" | "playlist";
+  ignoreDuration?: boolean;
 }
 
 // Download metadata
@@ -35,6 +37,9 @@ export interface DownloadMetadata {
   fileSize: number;
   localUri: string;
 }
+
+// Duration filter option
+export type DurationOption = "all" | "short" | "medium" | "long";
 
 // Sort option type for downloads
 export type DownloadSortOption =

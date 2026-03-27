@@ -129,7 +129,7 @@ export default function HomeScreen() {
     }, [isSearchActive, deactivateSearch]);
 
     const handleRefresh = async () => {
-        await filters.refresh();
+        await Promise.all([filters.refresh(), filters.refreshChannels()]);
     };
 
     const handleScroll = (event: any) => {
@@ -267,6 +267,12 @@ export default function HomeScreen() {
                                 <UnifiedFilterBar
                                     selectedSort={filters.selectedFilter}
                                     onSortChange={filters.setSelectedFilter}
+                                    channels={filters.channels}
+                                    selectedChannelId={filters.selectedChannelId}
+                                    onChannelChange={filters.setSelectedChannelId}
+                                    channelsLoading={filters.channelsLoading}
+                                    selectedDuration={filters.selectedDuration}
+                                    onDurationChange={filters.setSelectedDuration}
                                     hideChips={!filters.hasActiveHomeFilters}
                                     externalOpen={filters.showFilterModal}
                                     onExternalClose={() => filters.setShowFilterModal(false)}

@@ -2,11 +2,11 @@ import { AnimatedHeader } from "@/components/AnimatedHeader";
 import { AnimatedTabBar } from "@/components/AnimatedTabBar";
 import { colors } from "@/constants/theme";
 import { FilterModalProvider, useFilterModal } from "@/contexts/FilterModalContext";
-import { SearchProvider, useSearch as useSearchContext } from "@/contexts/SearchContext";
 import {
   HeaderVisibilityProvider,
   useHeaderVisibility,
 } from "@/contexts/HeaderVisibilityContext.animated";
+import { SearchProvider, useSearch as useSearchContext } from "@/contexts/SearchContext";
 import {
   TabBarVisibilityProvider,
   useTabBarVisibility,
@@ -45,8 +45,8 @@ function RootLayoutContent() {
   // Check if user is on video screen
   const isOnVideoScreen = segments[0] === "video";
 
-  // Check if user is on home screen
-  const isOnHomeScreen = segments[0] === "home";
+  // Check if user is on home screen (home route or undefined on initial load)
+  const isOnHomeScreen = segments[0] === "home" || segments[0] === undefined;
 
   return (
     <>
