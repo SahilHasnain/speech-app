@@ -651,42 +651,42 @@ export default async ({ req, res, log, error: logError }) => {
 
     log(`Found ${existingMap.size} existing speeches in database`);
 
-    // Process each channel
-    const channelResults = [];
-    for (const channel of channels) {
-      const result = await processChannel(
+    // Process each source (channel or playlist)
+    const sourceResults = [];
+    for (const source of channels) {
+      const result = await processSource(
         databases,
         databaseId,
         collectionId,
         existingMap,
-        channel,
+        source,
         youtubeApiKey,
         log,
         logError,
       );
-      channelResults.push(result);
+      sourceResults.push(result);
     }
 
     // Calculate overall statistics
     const overallResults = {
-      channelsProcessed: channelResults.length,
-      totalProcessed: channelResults.reduce((sum, r) => sum + r.processed, 0),
-      totalAdded: channelResults.reduce((sum, r) => sum + r.added, 0),
-      totalUpdated: channelResults.reduce((sum, r) => sum + r.updated, 0),
-      totalUnchanged: channelResults.reduce((sum, r) => sum + r.unchanged, 0),
-      totalFiltered: channelResults.reduce((sum, r) => sum + r.filtered, 0),
-      totalErrors: channelResults.reduce((sum, r) => sum + r.errors.length, 0),
+      sourcesProcessed: sourceResults.length,
+      totalProcessed: sourceResults.reduce((sum, r) => sum + r.processed, 0),
+      totalAdded: sourceResults.reduce((sum, r) => sum + r.added, 0),
+      totalUpdated: sourceResults.reduce((sum, r) => sum + r.updated, 0),
+      totalUnchanged: sourceResults.reduce((sum, r) => sum + r.unchanged, 0),
+      totalFiltered: sourceResults.reduce((sum, r) => sum + r.filtered, 0),
+      totalErrors: sourceResults.reduce((sum, r) => sum + r.errors.length, 0),
     };
 
     log("Speech ingestion completed");
     log(
-      `Overall Summary: ${overallResults.totalAdded} added, ${overallResults.totalUpdated} updated, ${overallResults.totalUnchanged} unchanged, ${overallResults.totalFiltered} filtered, ${overallResults.totalErrors} errors across ${overallResults.channelsProcessed} channel(s)`,
+      `Overall Summary: ${overallResults.totalAdded} added, ${overallResults.totalUpdated} updated, ${overallResults.totalUnchanged} unchanged, ${overallResults.totalFiltered} filtered, ${overallResults.totalErrors} errors across ${overallResults.sourcesProcessed} source(s)`,
     );
 
     return res.json({
       success: true,
       overall: overallResults,
-      channels: channelResults,
+      sources: sourceResults,
     });
   } catch (err) {
     const errorMsg = `Fatal error during ingestion: ${err.message}`;
