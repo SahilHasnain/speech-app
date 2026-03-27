@@ -1,8 +1,9 @@
 import { colors } from "@/constants/theme";
+import { SortOption } from "@/hooks/useSpeeches";
 import { Ionicons } from "@expo/vector-icons";
 import { Image } from "expo-image";
-import React from "react";
-import { Text, View } from "react-native";
+import React, { useEffect, useRef } from "react";
+import { Text, TextInput, View } from "react-native";
 import Animated, {
     SharedValue,
     useAnimatedStyle,
@@ -12,17 +13,51 @@ import Pressable from "./ResponsivePressable";
 interface AnimatedHeaderProps {
     translateY: SharedValue<number>;
     isScrolledDown: SharedValue<boolean>;
+    // Filter props
+    selectedSort: SortOption;
+    onFilterPress: () => void;
+    onSearchPress: () => void;
+    disableFilter?: boolean;
+    // Search mode props
+    isSearchActive?: boolean;
+    searchInput?: string;
+    onSearchInputChange?: (text: string) => void;
+    onSearchSubmit?: () => void;
+    onSearchClose?: () => void;
 }
 
 export function AnimatedHeader({
     translateY,
     isScrolledDown,
+    selectedSort,
+    onFilterPress,
+    onSearchPress,
+    disableFilter = false,
+    isSearchActive = false,
+    searchInput = "",
+    onSearchInputChange,
+    onSearchSubmit,
+    onSearchClose,
 }: AnimatedHeaderProps) {
+    const inputRef = useRef<TextInput>(null);
+
+    // Auto-focus input when search mode activates
+    useEffect(() => {
+        if (isSearchActive) {
+            setTimeout(() => {
+                inputRef.current?.focus();
+            }, 100);
+        }
+    }, [isSearchActive]);
+
     const animatedStyle = useAnimatedStyle(() => {
         return {
             transform: [{ translateY: translateY.value }],
         };
     });
+
+    // Check if any non-default filters are active
+    const hasActiveFilters = selectedSort !== "forYou";
 
     return (
         <Animated.View
@@ -33,41 +68,118 @@ export function AnimatedHeader({
                 className="px-4 pt-safe-top pb-1"
                 style={{ backgroundColor: colors.background.primary }}
             >
-                <View className="flex-row items-center justify-between mb-3">
-                    {/* Logo */}
-                    <View className="flex-row items-center gap-2">
-                        <View
-                            className="rounded-full overflow-hidden"
-                            style={{ width: 32, height: 32 }}
-                        >
-                            <Image
-                                source={require("@/assets/images/android-icon-foreground.png")}
-                                style={{ width: 32, height: 32 }}
-                                contentFit="cover"
-                            />
-                        </View>
-                        <Text
-                            className="text-lg font-semibold"
-                            style={{ color: colors.text.primary }}
-                        >
-                            Islamic Speeches
-                        </Text>
-                    </View>
-
-                    {/* Action Icons */}
-                    <View className="flex-row items-center gap-4">
-                        {/* Search - Placeholder for future */}
+                {isSearchActive ? (
+                    /* Search Mode */
+                    <View className="flex-row items-center mb-3">
+                        {/* Back Button */}
                         <Pressable
-                            onPress={() => { }}
-                            accessibilityLabel="Search"
+                            onPress={onSearchClose}
+                            className="mr-3"
+                            accessibilityLabel="Close search"
                             accessibilityRole="button"
-                            style={{ opacity: 0.3 }}
-                            disabled
+                            hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
                         >
-                            <Ionicons name="search" size={24} color={colors.text.primary} />
+                            <Ionicons
+                                name="arrow-back"
+                                size={24}
+                                color={colors.text.primary}
+                            />
                         </Pressable>
+
+                        {/* Search Input */}
+                        <View
+                            className="flex-1 flex-row items-center px-4 py-2.5 rounded-full"
+                            style={{ backgroundColor: colors.background.secondary }}
+                        >
+                            <Ionicons
+                                name="search"
+                                size={20}
+                                color={colors.text.secondary}
+                                style={{ marginRight: 12 }}
+                            />
+                            <TextInput
+                                ref={inputRef}
+                                value={searchInput}
+                                onChangeText={onSearchInputChange}
+                                onSubmitEditing={onSearchSubmit}
+                                placeholder="Search speeches..."
+                                placeholderTextColor={colors.text.secondary}
+                                className="flex-1 text-base"
+                                autoCapitalize="none"
+                                autoCorrect={false}
+                                returnKeyType="search"
+                                style={{ paddingVertical: 0, color: colors.text.primary }}
+                            />
+                            {searchInput.length > 0 && (
+                                <Pressable
+                                    onPress={() => onSearchInputChange?.("")}
+                                    accessibilityLabel="Clear search"
+                                    accessibilityRole="button"
+                                    hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                                >
+                                    <Ionicons
+                                        name="close-circle"
+                                        size={20}
+                                        color={colors.text.secondary}
+                                    />
+                                </Pressable>
+                            )}
+                        </View>
                     </View>
-                </View>
+                ) : (
+                    /* Normal Mode */
+                    <View className="flex-row items-center justify-between mb-3">
+                        {/* Logo */}
+                        <View className="flex-row items-center gap-2">
+                            <View
+                                className="rounded-full overflow-hidden"
+                                style={{ width: 32, height: 32 }}
+                            >
+                                <Image
+                                    source={require("@/assets/images/android-icon-foreground.png")}
+                                    style={{ width: 32, height: 32 }}
+                                    contentFit="cover"
+                                />
+                            </View>
+                            <Text
+                                className="text-lg font-semibold"
+                                style={{ color: colors.text.primary }}
+                            >
+                                Islamic Speeches
+                            </Text>
+                        </View>
+
+                        {/* Action Icons */}
+                        <View className="flex-row items-center gap-4">
+                            {/* Search */}
+                            <Pressable
+                                onPress={onSearchPress}
+                                accessibilityLabel="Search"
+                                accessibilityRole="button"
+                            >
+                                <Ionicons name="search" size={24} color={colors.text.primary} />
+                            </Pressable>
+
+                            {/* Filter */}
+                            <Pressable
+                                onPress={onFilterPress}
+                                accessibilityLabel="Open filters"
+                                accessibilityRole="button"
+                                disabled={disableFilter}
+                                style={{ opacity: disableFilter ? 0.3 : 1 }}
+                            >
+                                <Ionicons
+                                    name="options-outline"
+                                    size={24}
+                                    color={hasActiveFilters ? "#3b82f6" : colors.text.primary}
+                                />
+                                {hasActiveFilters && (
+                                    <View className="absolute -top-1 -right-1 w-2 h-2 bg-blue-500 rounded-full" />
+                                )}
+                            </Pressable>
+                        </View>
+                    </View>
+                )}
             </View>
         </Animated.View>
     );

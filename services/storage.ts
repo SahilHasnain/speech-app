@@ -8,6 +8,7 @@ const STORAGE_KEYS = {
   WATCH_HISTORY: "@speech_watch_history",
   WATCH_HISTORY_TIMESTAMPS: "@speech_watch_history_timestamps",
   PLAYBACK_MODE: "@speech_playback_mode",
+  FOR_YOU_SESSION: "@speech_for_you_session",
 } as const;
 
 const MAX_WATCH_HISTORY = 100;
@@ -139,6 +140,46 @@ class StorageService {
     } catch (error) {
       console.error("Error clearing watch history:", error);
       throw new Error("Failed to clear watch history.");
+    }
+  }
+
+  /**
+   * Save For You session order
+   * @param speechIds - Array of speech IDs in session order
+   */
+  async saveForYouSession(speechIds: string[]): Promise<void> {
+    try {
+      await AsyncStorage.setItem(
+        STORAGE_KEYS.FOR_YOU_SESSION,
+        JSON.stringify(speechIds)
+      );
+    } catch (error) {
+      console.error("Error saving For You session:", error);
+    }
+  }
+
+  /**
+   * Get For You session order
+   * @returns Array of speech IDs or null if no session
+   */
+  async getForYouSession(): Promise<string[] | null> {
+    try {
+      const data = await AsyncStorage.getItem(STORAGE_KEYS.FOR_YOU_SESSION);
+      return data ? JSON.parse(data) : null;
+    } catch (error) {
+      console.error("Error getting For You session:", error);
+      return null;
+    }
+  }
+
+  /**
+   * Clear For You session
+   */
+  async clearForYouSession(): Promise<void> {
+    try {
+      await AsyncStorage.removeItem(STORAGE_KEYS.FOR_YOU_SESSION);
+    } catch (error) {
+      console.error("Error clearing For You session:", error);
     }
   }
 }
