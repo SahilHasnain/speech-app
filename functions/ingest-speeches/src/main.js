@@ -17,6 +17,56 @@
 import { Client, Databases, ID, Query } from "node-appwrite";
 
 /**
+ * Fetches shorts video IDs from UUSH playlist (undocumented YouTube feature)
+ */
+async function getShortsVideoIds(channelId, apiKey, log) {
+  const baseUrl = "https://www.googleapis.com/youtube/v3";
+  const shortsPlaylistId = channelId.replace('UC', 'UUSH');
+  const shortsIds = new Set();
+  
+  try {
+    log(`Fetching shorts playlist (${shortsPlaylistId})...`);
+    let pageToken = null;
+    let totalShorts = 0;
+    
+    do {
+      let playlistUrl = `${baseUrl}/playlistItems?part=contentDetails&playlistId=${shortsPlaylistId}&maxResults=50&key=${apiKey}`;
+      
+      if (pageToken) {
+        playlistUrl += `&pageToken=${pageToken}`;
+      }
+      
+      const response = await fetch(playlistUrl);
+      
+      if (!response.ok) {
+        // Shorts playlist might not exist for this channel
+        log(`No shorts playlist found (this is normal if channel has no shorts)`);
+        break;
+      }
+      
+      const data = await response.json();
+      
+      if (data.items && data.items.length > 0) {
+        data.items.forEach(item => {
+          shortsIds.add(item.contentDetails.videoId);
+        });
+        totalShorts += data.items.length;
+      }
+      
+      pageToken = data.nextPageToken;
+    } while (pageToken);
+    
+    if (totalShorts > 0) {
+      log(`Found ${totalShorts} shorts to exclude`);
+    }
+  } catch (error) {
+    log(`Could not fetch shorts playlist: ${error.message}`);
+  }
+  
+  return shortsIds;
+}
+
+/**
  * Fetches videos from a YouTube channel
  */
 async function fetchYouTubeVideos(channelId, apiKey, maxResults = 5000, log) {
@@ -42,6 +92,9 @@ async function fetchYouTubeVideos(channelId, apiKey, maxResults = 5000, log) {
     const channelName = channelData.items[0].snippet.title;
     const uploadsPlaylistId =
       channelData.items[0].contentDetails.relatedPlaylists.uploads;
+
+    // Fetch shorts video IDs to exclude them
+    const shortsIds = await getShortsVideoIds(channelId, apiKey, log);
 
     const allVideoItems = [];
     let pageToken = null;
@@ -106,18 +159,31 @@ async function fetchYouTubeVideos(channelId, apiKey, maxResults = 5000, log) {
       allVideosData.push(...videosData.items);
     }
 
-    const videos = allVideosData.map((video) => ({
-      youtubeId: video.id,
-      title: video.snippet.title,
-      thumbnailUrl:
-        video.snippet.thumbnails.high?.url ||
-        video.snippet.thumbnails.medium?.url ||
-        video.snippet.thumbnails.default?.url,
-      duration: parseDuration(video.contentDetails.duration),
-      uploadDate: video.snippet.publishedAt,
-      views: parseInt(video.statistics?.viewCount || "0", 10),
-      description: video.snippet.description || "",
-    }));
+    const videos = allVideosData
+      .filter((video) => {
+        // Filter out shorts using UUSH playlist
+        if (shortsIds.has(video.id)) {
+          return false;
+        }
+        return true;
+      })
+      .map((video) => ({
+        youtubeId: video.id,
+        title: video.snippet.title,
+        thumbnailUrl:
+          video.snippet.thumbnails.high?.url ||
+          video.snippet.thumbnails.medium?.url ||
+          video.snippet.thumbnails.default?.url,
+        duration: parseDuration(video.contentDetails.duration),
+        uploadDate: video.snippet.publishedAt,
+        views: parseInt(video.statistics?.viewCount || "0", 10),
+        description: video.snippet.description || "",
+      }));
+
+    const shortsFilteredCount = allVideosData.length - videos.length;
+    if (shortsFilteredCount > 0) {
+      log(`Filtered ${shortsFilteredCount} shorts from video list`);
+    }
 
     return { channelId, channelName, videos };
   } catch (error) {
@@ -286,8 +352,13 @@ async function processChannel(
 ) {
   const channelName = channel.name;
   const channelId = channel.youtubeChannelId;
+  const ignoreDuration = channel.ignoreDuration || false;
 
   log(`Processing channel: ${channelName}`);
+  
+  if (ignoreDuration) {
+    log(`ignoreDuration is enabled for this channel`);
+  }
 
   try {
     const { videos } = await fetchYouTubeVideos(
@@ -312,18 +383,21 @@ async function processChannel(
 
     for (const video of videos) {
       try {
-        // Filter: Only speeches ≤5 minutes (300 seconds)
-        if (video.duration > 300) {
-          log(`Filtered: ${video.title} (duration ${video.duration}s > 300s)`);
+        // Universal filter: Skip shorts (< 60 seconds) - always applied
+        if (video.duration < 60) {
+          log(`Filtered: ${video.title} (duration ${video.duration}s < 60s, likely short)`);
           results.filtered++;
           continue;
         }
 
-        // Filter: Skip very short videos (< 60 seconds)
-        if (video.duration < 60) {
-          log(`Filtered: ${video.title} (duration ${video.duration}s < 60s)`);
-          results.filtered++;
-          continue;
+        // Duration filter: Only apply if ignoreDuration is false
+        if (!ignoreDuration) {
+          // Filter: Only speeches ≤5 minutes (300 seconds)
+          if (video.duration > 300) {
+            log(`Filtered: ${video.title} (duration ${video.duration}s > 300s)`);
+            results.filtered++;
+            continue;
+          }
         }
 
         const existingSpeech = existingMap.get(video.youtubeId);

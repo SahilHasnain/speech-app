@@ -83,6 +83,54 @@ function initAppwrite() {
   return new Databases(client);
 }
 
+// Fetch shorts video IDs from UUSH playlist (undocumented YouTube feature)
+async function getShortsVideoIds(channelId) {
+  const baseUrl = "https://www.googleapis.com/youtube/v3";
+  const shortsPlaylistId = channelId.replace('UC', 'UUSH');
+  const shortsIds = new Set();
+  
+  try {
+    console.log(`   Fetching shorts playlist (${shortsPlaylistId})...`);
+    let pageToken = null;
+    let totalShorts = 0;
+    
+    do {
+      let playlistUrl = `${baseUrl}/playlistItems?part=contentDetails&playlistId=${shortsPlaylistId}&maxResults=50&key=${config.youtubeApiKey}`;
+      
+      if (pageToken) {
+        playlistUrl += `&pageToken=${pageToken}`;
+      }
+      
+      const response = await fetch(playlistUrl);
+      
+      if (!response.ok) {
+        // Shorts playlist might not exist for this channel
+        console.log(`   ℹ️  No shorts playlist found (this is normal if channel has no shorts)`);
+        break;
+      }
+      
+      const data = await response.json();
+      
+      if (data.items && data.items.length > 0) {
+        data.items.forEach(item => {
+          shortsIds.add(item.contentDetails.videoId);
+        });
+        totalShorts += data.items.length;
+      }
+      
+      pageToken = data.nextPageToken;
+    } while (pageToken);
+    
+    if (totalShorts > 0) {
+      console.log(`   ✅ Found ${totalShorts} shorts to exclude`);
+    }
+  } catch (error) {
+    console.log(`   ℹ️  Could not fetch shorts playlist: ${error.message}`);
+  }
+  
+  return shortsIds;
+}
+
 // Fetch videos from YouTube channel
 async function fetchYouTubeVideos(channelId, maxResults = 5000) {
   const baseUrl = "https://www.googleapis.com/youtube/v3";
@@ -108,6 +156,9 @@ async function fetchYouTubeVideos(channelId, maxResults = 5000) {
     const channelName = channelData.items[0].snippet.title;
     const uploadsPlaylistId =
       channelData.items[0].contentDetails.relatedPlaylists.uploads;
+
+    // Fetch shorts video IDs to exclude them
+    const shortsIds = await getShortsVideoIds(channelId);
 
     // Fetch videos from uploads playlist with pagination
     const allVideoItems = [];
@@ -188,19 +239,32 @@ async function fetchYouTubeVideos(channelId, maxResults = 5000) {
       console.log(`   Processed details for ${allVideosData.length} videos...`);
     }
 
-    // Transform to our format
-    const videos = allVideosData.map((video) => ({
-      youtubeId: video.id,
-      title: video.snippet.title,
-      thumbnailUrl:
-        video.snippet.thumbnails.high?.url ||
-        video.snippet.thumbnails.medium?.url ||
-        video.snippet.thumbnails.default?.url,
-      duration: parseDuration(video.contentDetails.duration),
-      uploadDate: video.snippet.publishedAt,
-      views: parseInt(video.statistics?.viewCount || "0", 10),
-      description: video.snippet.description || "",
-    }));
+    // Transform to our format and filter out shorts
+    const videos = allVideosData
+      .filter((video) => {
+        // Filter out shorts using UUSH playlist
+        if (shortsIds.has(video.id)) {
+          return false;
+        }
+        return true;
+      })
+      .map((video) => ({
+        youtubeId: video.id,
+        title: video.snippet.title,
+        thumbnailUrl:
+          video.snippet.thumbnails.high?.url ||
+          video.snippet.thumbnails.medium?.url ||
+          video.snippet.thumbnails.default?.url,
+        duration: parseDuration(video.contentDetails.duration),
+        uploadDate: video.snippet.publishedAt,
+        views: parseInt(video.statistics?.viewCount || "0", 10),
+        description: video.snippet.description || "",
+      }));
+
+    const shortsFilteredCount = allVideosData.length - videos.length;
+    if (shortsFilteredCount > 0) {
+      console.log(`   🚫 Filtered ${shortsFilteredCount} shorts from video list`);
+    }
 
     return { channelId, channelName, videos };
   } catch (error) {
@@ -306,28 +370,50 @@ async function ingestChannelSpeeches(databases, existingMap, channelId, maxResul
 
   console.log(`   ✅ Found ${videos.length} videos for channel: ${channelName}`);
 
+  // Fetch channel document to check ignoreDuration setting
+  let ignoreDuration = false;
+  try {
+    const channelDocs = await databases.listDocuments(
+      config.databaseId,
+      config.channelsCollectionId,
+      [Query.equal("youtubeChannelId", channelId), Query.limit(1)],
+    );
+    
+    if (channelDocs.documents.length > 0) {
+      ignoreDuration = channelDocs.documents[0].ignoreDuration || false;
+      if (ignoreDuration) {
+        console.log(`   ⚙️  ignoreDuration is enabled for this channel`);
+      }
+    }
+  } catch (error) {
+    console.log(`   ⚠️  Could not fetch channel settings: ${error.message}`);
+  }
+
   let newCount = 0;
   let updatedCount = 0;
   let unchangedCount = 0;
   let errorCount = 0;
-  let filteredCount = 0;
+  let filteredDurationCount = 0;
 
   for (const video of videos) {
     const { youtubeId, title, duration, views: newViews } = video;
 
     try {
-      // Filter: Only speeches ≤5 minutes (300 seconds)
-      if (duration > 300) {
-        console.log(`   🚫 Filtered: ${title} (duration ${duration}s > 300s)`);
-        filteredCount++;
+      // Universal filter: Skip shorts (< 60 seconds) - always applied
+      if (duration < 60) {
+        console.log(`   🚫 Filtered: ${title} (duration ${duration}s < 60s, likely short)`);
+        filteredDurationCount++;
         continue;
       }
 
-      // Filter: Skip very short videos (< 60 seconds)
-      if (duration < 60) {
-        console.log(`   🚫 Filtered: ${title} (duration ${duration}s < 60s)`);
-        filteredCount++;
-        continue;
+      // Duration filter: Only apply if ignoreDuration is false
+      if (!ignoreDuration) {
+        // Filter: Only speeches ≤5 minutes (300 seconds)
+        if (duration > 300) {
+          console.log(`   🚫 Filtered: ${title} (duration ${duration}s > 300s)`);
+          filteredDurationCount++;
+          continue;
+        }
       }
 
       const existingSpeech = existingMap.get(youtubeId);
@@ -376,7 +462,7 @@ async function ingestChannelSpeeches(databases, existingMap, channelId, maxResul
     updatedCount,
     unchangedCount,
     errorCount,
-    filteredCount,
+    filteredDurationCount,
     totalVideos: videos.length,
   };
 }
@@ -437,7 +523,7 @@ async function ingestSpeeches() {
           updatedCount: 0,
           unchangedCount: 0,
           errorCount: 0,
-          filteredCount: 0,
+          filteredDurationCount: 0,
           totalVideos: 0,
           error: error.message,
         });
@@ -458,7 +544,7 @@ async function ingestSpeeches() {
         console.log(`   ✅ New speeches added: ${result.newCount}`);
         console.log(`   🔄 Speeches updated: ${result.updatedCount}`);
         console.log(`   ⏭️  Speeches unchanged: ${result.unchangedCount}`);
-        console.log(`   🚫 Videos filtered (>5min or <1min): ${result.filteredCount}`);
+        console.log(`   🚫 Videos filtered by duration (>5min or <1min): ${result.filteredDurationCount}`);
         console.log(`   ❌ Errors: ${result.errorCount}`);
       }
     }
@@ -468,7 +554,7 @@ async function ingestSpeeches() {
     const totalUpdated = channelResults.reduce((sum, r) => sum + r.updatedCount, 0);
     const totalUnchanged = channelResults.reduce((sum, r) => sum + r.unchangedCount, 0);
     const totalErrors = channelResults.reduce((sum, r) => sum + r.errorCount, 0);
-    const totalFiltered = channelResults.reduce((sum, r) => sum + r.filteredCount, 0);
+    const totalFilteredDuration = channelResults.reduce((sum, r) => sum + r.filteredDurationCount, 0);
     const totalVideos = channelResults.reduce((sum, r) => sum + r.totalVideos, 0);
 
     console.log("\n" + "=".repeat(60));
@@ -479,7 +565,8 @@ async function ingestSpeeches() {
     console.log(`   ✅ New speeches added: ${totalNew}`);
     console.log(`   🔄 Speeches updated: ${totalUpdated}`);
     console.log(`   ⏭️  Speeches unchanged: ${totalUnchanged}`);
-    console.log(`   🚫 Videos filtered: ${totalFiltered}`);
+    console.log(`   🚫 Videos filtered by duration: ${totalFilteredDuration}`);
+    console.log(`   ℹ️  Note: Shorts are excluded before processing`);
     console.log(`   ❌ Errors: ${totalErrors}`);
     console.log("\n✨ Ingestion complete!");
     

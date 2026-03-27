@@ -137,6 +137,7 @@ async function addChannel(databases, channelInfo) {
         youtubeChannelId: channelInfo.youtubeChannelId,
         thumbnailUrl: channelInfo.thumbnailUrl,
         description: channelInfo.description,
+        ignoreDuration: channelInfo.ignoreDuration || false,
       },
     );
 
@@ -158,6 +159,54 @@ function parseDuration(isoDuration) {
   return hours * 3600 + minutes * 60 + seconds;
 }
 
+// Fetch shorts video IDs from UUSH playlist (undocumented YouTube feature)
+async function getShortsVideoIds(channelId) {
+  const baseUrl = "https://www.googleapis.com/youtube/v3";
+  const shortsPlaylistId = channelId.replace('UC', 'UUSH');
+  const shortsIds = new Set();
+  
+  try {
+    console.log(`   Fetching shorts playlist (${shortsPlaylistId})...`);
+    let pageToken = null;
+    let totalShorts = 0;
+    
+    do {
+      let playlistUrl = `${baseUrl}/playlistItems?part=contentDetails&playlistId=${shortsPlaylistId}&maxResults=50&key=${config.youtubeApiKey}`;
+      
+      if (pageToken) {
+        playlistUrl += `&pageToken=${pageToken}`;
+      }
+      
+      const response = await fetch(playlistUrl);
+      
+      if (!response.ok) {
+        // Shorts playlist might not exist for this channel
+        console.log(`   ℹ️  No shorts playlist found (this is normal if channel has no shorts)`);
+        break;
+      }
+      
+      const data = await response.json();
+      
+      if (data.items && data.items.length > 0) {
+        data.items.forEach(item => {
+          shortsIds.add(item.contentDetails.videoId);
+        });
+        totalShorts += data.items.length;
+      }
+      
+      pageToken = data.nextPageToken;
+    } while (pageToken);
+    
+    if (totalShorts > 0) {
+      console.log(`   ✅ Found ${totalShorts} shorts to exclude`);
+    }
+  } catch (error) {
+    console.log(`   ℹ️  Could not fetch shorts playlist: ${error.message}`);
+  }
+  
+  return shortsIds;
+}
+
 // Fetch videos from channel
 async function fetchChannelVideos(channelId, maxResults = 5000) {
   const baseUrl = "https://www.googleapis.com/youtube/v3";
@@ -174,6 +223,9 @@ async function fetchChannelVideos(channelId, maxResults = 5000) {
     const channelData = await channelResponse.json();
     const channelName = channelData.items[0].snippet.title;
     const uploadsPlaylistId = channelData.items[0].contentDetails.relatedPlaylists.uploads;
+
+    // Fetch shorts video IDs to exclude them
+    const shortsIds = await getShortsVideoIds(channelId);
 
     const allVideoItems = [];
     let pageToken = null;
@@ -226,18 +278,31 @@ async function fetchChannelVideos(channelId, maxResults = 5000) {
       allVideosData.push(...videosData.items);
     }
 
-    const videos = allVideosData.map((video) => ({
-      youtubeId: video.id,
-      title: video.snippet.title,
-      thumbnailUrl:
-        video.snippet.thumbnails.high?.url ||
-        video.snippet.thumbnails.medium?.url ||
-        video.snippet.thumbnails.default?.url,
-      duration: parseDuration(video.contentDetails.duration),
-      uploadDate: video.snippet.publishedAt,
-      views: parseInt(video.statistics?.viewCount || "0", 10),
-      description: video.snippet.description || "",
-    }));
+    const videos = allVideosData
+      .filter((video) => {
+        // Filter out shorts using UUSH playlist
+        if (shortsIds.has(video.id)) {
+          return false;
+        }
+        return true;
+      })
+      .map((video) => ({
+        youtubeId: video.id,
+        title: video.snippet.title,
+        thumbnailUrl:
+          video.snippet.thumbnails.high?.url ||
+          video.snippet.thumbnails.medium?.url ||
+          video.snippet.thumbnails.default?.url,
+        duration: parseDuration(video.contentDetails.duration),
+        uploadDate: video.snippet.publishedAt,
+        views: parseInt(video.statistics?.viewCount || "0", 10),
+        description: video.snippet.description || "",
+      }));
+
+    const shortsFilteredCount = allVideosData.length - videos.length;
+    if (shortsFilteredCount > 0) {
+      console.log(`   🚫 Filtered ${shortsFilteredCount} shorts from video list`);
+    }
 
     return { channelId, channelName, videos };
   } catch (error) {
@@ -276,7 +341,7 @@ async function getExistingSpeeches(databases) {
 }
 
 // Ingest speeches for channel
-async function ingestChannelSpeeches(databases, channelId, channelName, maxResults = 5000) {
+async function ingestChannelSpeeches(databases, channelId, channelName, maxResults = 5000, ignoreDuration = false) {
   console.log(`\n📺 Fetching videos from channel...`);
 
   const { videos } = await fetchChannelVideos(channelId, maxResults);
@@ -294,17 +359,23 @@ async function ingestChannelSpeeches(databases, channelId, channelName, maxResul
 
   for (const video of videos) {
     try {
-      // Filter: 1-5 minutes only
-      if (video.duration > 300) {
-        console.log(`   🚫 Filtered: ${video.title} (${video.duration}s > 300s)`);
+      // Universal filter: Skip shorts (< 60 seconds) - always applied
+      if (video.duration < 60) {
+        console.log(`   🚫 Filtered: ${video.title} (${video.duration}s < 60s, likely short)`);
         filtered++;
         continue;
       }
 
-      if (video.duration < 60) {
-        console.log(`   🚫 Filtered: ${video.title} (${video.duration}s < 60s)`);
-        filtered++;
-        continue;
+      // Duration filter: Only apply if ignoreDuration is false
+      if (!ignoreDuration) {
+        // Filter: 1-5 minutes only
+        if (video.duration > 300) {
+          console.log(`   🚫 Filtered: ${video.title} (${video.duration}s > 300s)`);
+          filtered++;
+          continue;
+        }
+      } else {
+        console.log(`   ℹ️  Duration check skipped for: ${video.title} (ignoreDuration enabled)`);
       }
 
       const existing = existingMap.get(video.youtubeId);
@@ -392,13 +463,21 @@ async function main() {
     const exists = await channelExists(databases, trimmedChannelId);
 
     if (exists) {
-      console.log("⚠️  This channel already exists in the database.\n");
-      const proceed = await question("Do you want to ingest speeches anyway? (y/n): ");
-
-      if (proceed.toLowerCase() !== "y") {
-        console.log("\n👋 Cancelled. Goodbye!");
-        rl.close();
-        process.exit(0);
+      console.log("ℹ️  This channel already exists in the database.");
+      console.log("   Proceeding with ingestion...\n");
+      
+      // Fetch the existing channel document to get ignoreDuration setting
+      const existingChannel = await databases.listDocuments(
+        config.databaseId,
+        config.channelsCollectionId,
+        [Query.equal("youtubeChannelId", trimmedChannelId), Query.limit(1)],
+      );
+      
+      if (existingChannel.documents.length > 0) {
+        channelInfo.ignoreDuration = existingChannel.documents[0].ignoreDuration || false;
+        if (channelInfo.ignoreDuration) {
+          console.log("   ⚙️  ignoreDuration is enabled for this channel");
+        }
       }
     } else {
       // Confirm adding channel
@@ -408,6 +487,20 @@ async function main() {
         console.log("\n👋 Cancelled. Goodbye!");
         rl.close();
         process.exit(0);
+      }
+
+      // Ask about ignoreDuration setting
+      console.log("\n⚙️  Duration Settings:");
+      console.log("   By default, only videos between 1-5 minutes are ingested.");
+      console.log("   Shorts (< 60 seconds) are always filtered out.");
+      const ignoreDurationInput = await question("Ignore duration limit (allow videos > 5 minutes)? (y/n): ");
+      
+      channelInfo.ignoreDuration = ignoreDurationInput.toLowerCase() === "y";
+      
+      if (channelInfo.ignoreDuration) {
+        console.log("   ✅ Duration limit disabled - will ingest videos of any length (except shorts)");
+      } else {
+        console.log("   ✅ Duration limit enabled - will only ingest videos 1-5 minutes");
       }
 
       console.log("\n💾 Adding channel to database...");
@@ -441,6 +534,7 @@ async function main() {
         trimmedChannelId,
         channelInfo.name,
         maxResults,
+        channelInfo.ignoreDuration || false,
       );
 
       console.log("\n═══════════════════════════════════════════════════════════");
