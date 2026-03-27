@@ -89,6 +89,7 @@ export interface SpeechCardProps {
   views: number;
   onPress: () => void;
   onLongPress?: () => void;
+  progressPercentage?: number; // 0-100, shows progress bar if present
 }
 
 export interface VideoPlayerProps {

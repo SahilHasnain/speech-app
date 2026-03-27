@@ -3,13 +3,14 @@ import HistoryCard from "@/components/HistoryCard";
 import { colors } from "@/constants/theme";
 import { useTabBarVisibility } from "@/contexts/TabBarVisibilityContext.animated";
 import { HistoryItem, useHistory } from "@/hooks/useHistory";
+import { getAllSpeechesWithProgress, VideoProgress } from "@/services/progressTracking";
 import { storageService } from "@/services/storage";
 import { DateGroup, groupByDate } from "@/utils/dateGrouping";
 import { Ionicons } from "@expo/vector-icons";
 import { useFocusEffect } from "@react-navigation/native";
 import { LinearGradient } from "expo-linear-gradient";
 import { useRouter } from "expo-router";
-import { useCallback, useMemo, useRef } from "react";
+import { useCallback, useMemo, useRef, useState } from "react";
 import {
     AccessibilityInfo,
     ActivityIndicator,
@@ -46,10 +47,12 @@ function SwipeableHistoryCard({
     item,
     onPress,
     onDelete,
+    progressPercentage,
 }: {
     item: HistoryItem;
     onPress: () => void;
     onDelete: () => void;
+    progressPercentage?: number;
 }) {
     const translateX = useSharedValue(0);
     const itemHeight = useSharedValue(1);
@@ -124,6 +127,7 @@ function SwipeableHistoryCard({
                         views={item.views}
                         watchedAt={item.watchedAt}
                         onPress={onPress}
+                        progressPercentage={progressPercentage}
                     />
                 </Animated.View>
             </GestureDetector>
@@ -151,11 +155,21 @@ export default function HistoryScreen() {
         removeFromHistory,
     } = useHistory();
 
+    // Progress tracking state
+    const [progressData, setProgressData] = useState<Record<string, VideoProgress>>({});
+
+    // Load progress data
+    const loadProgressData = useCallback(async () => {
+        const progress = await getAllSpeechesWithProgress();
+        setProgressData(progress);
+    }, []);
+
     // Refresh data when screen comes into focus
     useFocusEffect(
         useCallback(() => {
             refresh();
-        }, [refresh])
+            loadProgressData();
+        }, [refresh, loadProgressData])
     );
 
     // Force tab bar to show when this screen is focused
@@ -292,16 +306,22 @@ export default function HistoryScreen() {
 
     // Render individual speech card
     const renderHistoryCard = useCallback(
-        ({ item }: { item: HistoryItem }) => (
-            <View className="px-4">
-                <SwipeableHistoryCard
-                    item={item}
-                    onPress={() => handleSpeechPress(item.$id)}
-                    onDelete={() => handleDeleteItem(item.$id, item.title)}
-                />
-            </View>
-        ),
-        [handleSpeechPress, handleDeleteItem]
+        ({ item }: { item: HistoryItem }) => {
+            const progress = progressData[item.$id];
+            const progressPercentage = progress?.percentage;
+
+            return (
+                <View className="px-4">
+                    <SwipeableHistoryCard
+                        item={item}
+                        onPress={() => handleSpeechPress(item.$id)}
+                        onDelete={() => handleDeleteItem(item.$id, item.title)}
+                        progressPercentage={progressPercentage}
+                    />
+                </View>
+            );
+        },
+        [handleSpeechPress, handleDeleteItem, progressData]
     );
 
     // Handle infinite scroll

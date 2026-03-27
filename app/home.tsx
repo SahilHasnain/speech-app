@@ -8,12 +8,13 @@ import { useSearch as useSearchContext } from "@/contexts/SearchContext";
 import { useTabBarVisibility } from "@/contexts/TabBarVisibilityContext.animated";
 import { useHomeFilters } from "@/hooks/useHomeFilters";
 import { useSearchSuggestions } from "@/hooks/useSearchSuggestions";
+import { getAllSpeechesWithProgress, VideoProgress } from "@/services/progressTracking";
 import { storageService } from "@/services/storage";
 import { Speech } from "@/types";
 import { useFocusEffect } from "@react-navigation/native";
 import { LinearGradient } from "expo-linear-gradient";
 import { useRouter } from "expo-router";
-import React, { useCallback, useEffect, useRef } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
     ActivityIndicator,
     BackHandler,
@@ -27,6 +28,7 @@ import {
 export default function HomeScreen() {
     const router = useRouter();
     const flatListRef = useRef<FlatList>(null);
+    const [progressData, setProgressData] = useState<Record<string, VideoProgress>>({});
 
     // Contexts
     const {
@@ -103,6 +105,17 @@ export default function HomeScreen() {
         }, [showTabBar])
     );
 
+    // Load progress data when screen is focused
+    useFocusEffect(
+        useCallback(() => {
+            const loadProgress = async () => {
+                const progress = await getAllSpeechesWithProgress();
+                setProgressData(progress);
+            };
+            loadProgress();
+        }, [])
+    );
+
     // Android back button
     useEffect(() => {
         const sub = BackHandler.addEventListener("hardwareBackPress", () => {
@@ -146,6 +159,9 @@ export default function HomeScreen() {
 
     const renderSpeechCard = React.useCallback(
         ({ item }: { item: Speech }) => {
+            const progress = progressData[item.$id];
+            const progressPercentage = progress ? progress.percentage : undefined;
+
             return (
                 <SpeechCard
                     id={item.$id}
@@ -156,10 +172,11 @@ export default function HomeScreen() {
                     channelName={item.channelName}
                     views={item.views}
                     onPress={() => handleSpeechPress(item.$id)}
+                    progressPercentage={progressPercentage}
                 />
             );
         },
-        [filters.displayData]
+        [filters.displayData, progressData]
     );
 
     const renderFooter = () => {

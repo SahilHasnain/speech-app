@@ -27,6 +27,7 @@ const SpeechCard: React.FC<SpeechCardProps> = ({
     views,
     onPress,
     onLongPress,
+    progressPercentage,
 }) => {
     const [imageError, setImageError] = React.useState(false);
     const [imageLoading, setImageLoading] = React.useState(true);
@@ -115,6 +116,22 @@ const SpeechCard: React.FC<SpeechCardProps> = ({
                             {formatDuration(duration)}
                         </Text>
                     </View>
+
+                    {/* Progress Bar */}
+                    {progressPercentage !== undefined && progressPercentage > 0 && (
+                        <View
+                            className="absolute bottom-0 left-0 right-0 h-1"
+                            style={{ backgroundColor: "rgba(255, 255, 255, 0.3)" }}
+                        >
+                            <View
+                                className="h-full"
+                                style={{
+                                    width: `${progressPercentage}%`,
+                                    backgroundColor: colors.accent.primary,
+                                }}
+                            />
+                        </View>
+                    )}
                 </View>
 
                 <View className="px-2 pt-3">
@@ -160,7 +177,8 @@ const arePropsEqual = (
         prevProps.thumbnail === nextProps.thumbnail &&
         prevProps.duration === nextProps.duration &&
         prevProps.uploadDate === nextProps.uploadDate &&
-        prevProps.views === nextProps.views
+        prevProps.views === nextProps.views &&
+        prevProps.progressPercentage === nextProps.progressPercentage
     );
 };
 

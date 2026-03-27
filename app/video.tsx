@@ -1,6 +1,7 @@
 import Pressable from "@/components/ResponsivePressable";
 import { colors, shadows } from "@/constants/theme";
 import { useTabBarVisibility } from "@/contexts/TabBarVisibilityContext.animated";
+import { getProgress, saveProgress } from "@/services/progressTracking";
 import { Ionicons } from "@expo/vector-icons";
 import Slider from "@react-native-community/slider";
 import { LinearGradient } from "expo-linear-gradient";
@@ -35,10 +36,13 @@ export default function VideoScreen() {
     const [videoDuration, setVideoDuration] = React.useState(0);
     const [videoPosition, setVideoPosition] = React.useState(0);
     const [isRepeatEnabled, setIsRepeatEnabled] = React.useState(false);
+    const [hasRestoredProgress, setHasRestoredProgress] = React.useState(false);
+    const lastSavedProgressRef = React.useRef<number>(0);
     const playerRef = React.useRef<any>(null);
 
     const videoUrl = params.videoUrl;
     const title = params.title;
+    const speechId = params.speechId;
 
     // Get tab bar visibility context
     const { showTabBar } = useTabBarVisibility();
@@ -73,6 +77,7 @@ export default function VideoScreen() {
         setIsLoading(true);
         setVideoPosition(0);
         setVideoPlaying(true);
+        setHasRestoredProgress(false);
 
         const loadingTimeout = setTimeout(() => {
             if (isLoading) {
@@ -84,6 +89,36 @@ export default function VideoScreen() {
             clearTimeout(loadingTimeout);
         };
     }, [videoUrl]);
+
+    // Restore saved progress when video is ready
+    React.useEffect(() => {
+        const restoreProgress = async () => {
+            if (!speechId || hasRestoredProgress || !playerRef.current || videoDuration === 0) {
+                return;
+            }
+
+            try {
+                const savedProgress = await getProgress(speechId);
+                if (savedProgress && savedProgress.progress > 0) {
+                    // Only restore if progress is between 5% and 95%
+                    const percentage = (savedProgress.progress / savedProgress.duration) * 100;
+                    if (percentage >= 5 && percentage <= 95) {
+                        await playerRef.current.seekTo(savedProgress.progress, true);
+                        setVideoPosition(savedProgress.progress);
+                        setHasRestoredProgress(true);
+                        console.log(`Restored progress: ${savedProgress.progress}s (${percentage.toFixed(1)}%)`);
+                    }
+                }
+            } catch (error) {
+                console.error("Failed to restore progress:", error);
+            }
+        };
+
+        if (videoDuration > 0 && !hasRestoredProgress) {
+            // Wait a bit for player to be fully ready
+            setTimeout(restoreProgress, 1000);
+        }
+    }, [speechId, videoDuration, hasRestoredProgress]);
 
     // Handle fullscreen changes
     const handleFullscreenChange = async (isFullscreen: boolean) => {
@@ -104,8 +139,20 @@ export default function VideoScreen() {
             if (isFullscreen) {
                 ScreenOrientation.unlockAsync();
             }
+
+            // Save progress on unmount
+            if (speechId && videoDuration > 0 && playerRef.current) {
+                (async () => {
+                    try {
+                        const currentTime = await playerRef.current.getCurrentTime();
+                        await saveProgress(speechId, currentTime, videoDuration);
+                    } catch (error) {
+                        console.error("Error saving progress on unmount:", error);
+                    }
+                })();
+            }
         };
-    }, [isFullscreen]);
+    }, [isFullscreen, speechId, videoDuration]);
 
     // Update video position periodically
     React.useEffect(() => {
@@ -125,6 +172,17 @@ export default function VideoScreen() {
                             // Ignore duration errors
                         }
                     }
+
+                    // Save progress every 10 seconds if playing
+                    if (
+                        speechId &&
+                        videoPlaying &&
+                        videoDuration > 0 &&
+                        Math.abs(currentTime - lastSavedProgressRef.current) >= 10
+                    ) {
+                        await saveProgress(speechId, currentTime, videoDuration);
+                        lastSavedProgressRef.current = currentTime;
+                    }
                 } catch {
                     // Ignore errors
                 }
@@ -132,11 +190,11 @@ export default function VideoScreen() {
         }, 500);
 
         return () => clearInterval(interval);
-    }, [videoDuration]);
+    }, [videoDuration, videoPlaying, speechId]);
 
     // Handle video state changes
     const onStateChange = React.useCallback(
-        (state: string) => {
+        async (state: string) => {
             if (state === "playing") {
                 setIsLoading(false);
                 setVideoPlaying(true);
@@ -155,8 +213,27 @@ export default function VideoScreen() {
                 }
             } else if (state === "paused") {
                 setVideoPlaying(false);
+
+                // Save progress when paused
+                if (speechId && videoDuration > 0 && playerRef.current) {
+                    try {
+                        const currentTime = await playerRef.current.getCurrentTime();
+                        await saveProgress(speechId, currentTime, videoDuration);
+                    } catch (error) {
+                        console.error("Error saving progress on pause:", error);
+                    }
+                }
             } else if (state === "ended") {
                 setVideoPlaying(false);
+
+                // Save progress when ended (will be removed if >95%)
+                if (speechId && videoDuration > 0) {
+                    try {
+                        await saveProgress(speechId, videoDuration, videoDuration);
+                    } catch (error) {
+                        console.error("Error saving progress on end:", error);
+                    }
+                }
 
                 if (isRepeatEnabled && playerRef.current) {
                     setTimeout(async () => {
@@ -170,7 +247,7 @@ export default function VideoScreen() {
                 }
             }
         },
-        [isRepeatEnabled, videoDuration],
+        [isRepeatEnabled, videoDuration, speechId],
     );
 
     // Seek to position in video

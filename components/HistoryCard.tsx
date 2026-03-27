@@ -21,10 +21,11 @@ interface HistoryCardProps {
     views: number;
     watchedAt: number;
     onPress: () => void;
+    progressPercentage?: number; // 0-100, shows progress bar if present
 }
 
 const HistoryCard: React.FC<HistoryCardProps> = React.memo(
-    ({ title, thumbnail, duration, channelName, views, watchedAt, onPress }) => {
+    ({ title, thumbnail, duration, channelName, views, watchedAt, onPress, progressPercentage }) => {
         const [imageError, setImageError] = React.useState(false);
 
         return (
@@ -75,6 +76,22 @@ const HistoryCard: React.FC<HistoryCardProps> = React.memo(
                             {formatDuration(duration)}
                         </Text>
                     </View>
+
+                    {/* Progress Bar */}
+                    {progressPercentage !== undefined && progressPercentage > 0 && (
+                        <View
+                            className="absolute bottom-0 left-0 right-0 h-1"
+                            style={{ backgroundColor: "rgba(255, 255, 255, 0.3)" }}
+                        >
+                            <View
+                                className="h-full"
+                                style={{
+                                    width: `${progressPercentage}%`,
+                                    backgroundColor: colors.accent.primary,
+                                }}
+                            />
+                        </View>
+                    )}
                 </View>
 
                 {/* Content Section */}
