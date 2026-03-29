@@ -136,7 +136,7 @@ export function AnimatedHeader({
                                 style={{ width: 32, height: 32 }}
                             >
                                 <Image
-                                    source={require("@/assets/images/android-icon-foreground.png")}
+                                    source={require("@/assets/images/icon.png")}
                                     style={{ width: 32, height: 32 }}
                                     contentFit="cover"
                                 />
@@ -145,7 +145,7 @@ export function AnimatedHeader({
                                 className="text-lg font-semibold"
                                 style={{ color: colors.text.primary }}
                             >
-                                Islamic Speeches
+                                2 Mins for Islam
                             </Text>
                         </View>
 

@@ -1,23 +1,29 @@
 import { Client, Databases, Storage } from "appwrite";
 
+const frontendConfig = {
+  endpoint: "https://sgp.cloud.appwrite.io/v1",
+  projectId: "69c60b0e001c5ec5e031",
+  databaseId: "69c60d540003506ba3cf",
+  speechesCollectionId: "69c60d5700050177d8ff",
+  channelsCollectionId: "69c60d6c002054f70390",
+  historyCollectionId: "",
+} as const;
+
 // Appwrite configuration
 const client = new Client();
 
 client
-  .setEndpoint(process.env.EXPO_PUBLIC_APPWRITE_ENDPOINT || "")
-  .setProject(process.env.EXPO_PUBLIC_APPWRITE_PROJECT_ID || "");
+  .setEndpoint(frontendConfig.endpoint)
+  .setProject(frontendConfig.projectId);
 
 export const databases = new Databases(client);
 export const storage = new Storage(client);
 
 export const config = {
-  databaseId: process.env.EXPO_PUBLIC_APPWRITE_DATABASE_ID || "",
-  speechesCollectionId:
-    process.env.EXPO_PUBLIC_APPWRITE_SPEECHES_COLLECTION_ID || "",
-  channelsCollectionId:
-    process.env.EXPO_PUBLIC_APPWRITE_CHANNELS_COLLECTION_ID || "",
-  historyCollectionId:
-    process.env.EXPO_PUBLIC_APPWRITE_HISTORY_COLLECTION_ID || "",
+  databaseId: frontendConfig.databaseId,
+  speechesCollectionId: frontendConfig.speechesCollectionId,
+  channelsCollectionId: frontendConfig.channelsCollectionId,
+  historyCollectionId: frontendConfig.historyCollectionId,
 };
 
 export default client;

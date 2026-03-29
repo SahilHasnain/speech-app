@@ -1,6 +1,6 @@
 {
   "expo": {
-    "name": "Islamic Speeches",
+    "name": "2 Mins for Islam",
     "slug": "islamic-speeches",
     "version": "1.0.0",
     "orientation": "portrait",
@@ -15,8 +15,7 @@
     "android": {
       "versionCode": 1,
       "adaptiveIcon": {
-        "foregroundImage": "./assets/images/android-icon-foreground.png",
-        "backgroundColor": "#000000"
+        "foregroundImage": "./assets/images/icon.png"
       },
       "edgeToEdgeEnabled": true,
       "predictiveBackGestureEnabled": false,
@@ -33,7 +32,7 @@
       [
         "expo-splash-screen",
         {
-          "image": "./assets/images/splash-icon.png",
+          "image": "./assets/images/icon.png",
           "resizeMode": "cover",
           "backgroundColor": "#000000"
         }
