@@ -1,7 +1,7 @@
 import { useFilterModal } from "@/contexts/FilterModalContext";
 import { useSearch as useSearchContext } from "@/contexts/SearchContext";
 import { useChannels } from "@/hooks/useChannels";
-import { useClientSearch } from "@/hooks/useClientSearch";
+import { useSearch } from "@/hooks/useSearch";
 import { SortOption, useSpeeches } from "@/hooks/useSpeeches";
 import type { DurationOption, Speech } from "@/types";
 import React, { useState } from "react";
@@ -36,6 +36,8 @@ export function useHomeFilters() {
     const [selectedFilter, setSelectedFilter] = useState<SortOption>("forYou");
     const [selectedChannelId, setSelectedChannelId] = useState<string | null>(null);
     const [selectedDuration, setSelectedDuration] = useState<DurationOption>("all");
+    const [searchChannelId, setSearchChannelId] = useState<string | null>(null);
+    const [searchDuration, setSearchDuration] = useState<DurationOption>("all");
 
     const { showFilterModal, setShowFilterModal } = useFilterModal();
     const { isSearchActive, activeSearchQuery } = useSearchContext();
@@ -43,7 +45,7 @@ export function useHomeFilters() {
     // Data fetching
     const { channels, loading: channelsLoading, refresh: refreshChannels } = useChannels();
     const { speeches, loading, error, hasMore, loadMore, refresh } = useSpeeches(selectedFilter);
-    const { results: searchResults, loading: searchLoading, setQuery } = useClientSearch(speeches);
+    const { results: searchResults, loading: searchLoading, setQuery } = useSearch(searchChannelId);
 
     const isShowingSearchResults = isSearchActive && activeSearchQuery.length > 0;
 
@@ -63,8 +65,8 @@ export function useHomeFilters() {
     }, [speeches, selectedChannelId, selectedDuration]);
 
     const searchDisplayData = React.useMemo(() => {
-        return searchResults;
-    }, [searchResults]);
+        return filterSpeechesByDuration(searchResults, searchDuration);
+    }, [searchResults, searchDuration]);
 
     const displayData = isShowingSearchResults ? searchDisplayData : homeDisplayData;
     const isLoading = isShowingSearchResults ? searchLoading : loading;
@@ -74,6 +76,11 @@ export function useHomeFilters() {
         selectedChannelId !== null ||
         selectedDuration !== "all";
 
+    const resetSearchFilters = React.useCallback(() => {
+        setSearchChannelId(null);
+        setSearchDuration("all");
+    }, []);
+
     return {
         // Home filters
         selectedFilter,
@@ -82,6 +89,11 @@ export function useHomeFilters() {
         setSelectedChannelId,
         selectedDuration,
         setSelectedDuration,
+        searchChannelId,
+        setSearchChannelId,
+        searchDuration,
+        setSearchDuration,
+        resetSearchFilters,
         // Filter modal
         showFilterModal,
         setShowFilterModal,

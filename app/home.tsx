@@ -1,4 +1,5 @@
 import EmptyState from "@/components/EmptyState";
+import { SearchFilterBar } from "@/components/SearchFilterBar";
 import { SearchSuggestions } from "@/components/SearchSuggestions";
 import SpeechCard from "@/components/SpeechCard";
 import UnifiedFilterBar from "@/components/UnifiedFilterBar";
@@ -45,11 +46,10 @@ export default function HomeScreen() {
 
     // Custom hooks
     const filters = useHomeFilters();
-    const { setQuery, isShowingSearchResults } = filters;
+    const { setQuery, resetSearchFilters, isShowingSearchResults } = filters;
 
     // Search suggestions
     const { suggestions, updateSuggestions, addToHistory } = useSearchSuggestions({
-        speeches: filters.speeches,
         maxSuggestions: 10,
     });
 
@@ -58,7 +58,7 @@ export default function HomeScreen() {
     // --- Search orchestration effects ---
 
     useEffect(() => {
-        if (isSearchActive) updateSuggestions(searchInput);
+        if (isSearchActive) updateSuggestions();
     }, [searchInput, isSearchActive, updateSuggestions]);
 
     useEffect(() => {
@@ -79,6 +79,7 @@ export default function HomeScreen() {
 
     useEffect(() => {
         if (!isSearchActive) {
+            resetSearchFilters();
             setQuery("");
         }
         // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -262,7 +263,18 @@ export default function HomeScreen() {
                         paddingBottom: 120,
                     }}
                     ListHeaderComponent={
-                        !isSearchActive ? (
+                        filters.isShowingSearchResults ? (
+                            <>
+                                <SearchFilterBar
+                                    channels={filters.channels}
+                                    selectedChannelId={filters.searchChannelId}
+                                    onChannelChange={filters.setSearchChannelId}
+                                    selectedDuration={filters.searchDuration}
+                                    onDurationChange={filters.setSearchDuration}
+                                />
+                                <View style={{ height: 12 }} />
+                            </>
+                        ) : !isSearchActive ? (
                             <>
                                 <UnifiedFilterBar
                                     selectedSort={filters.selectedFilter}

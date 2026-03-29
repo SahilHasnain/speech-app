@@ -1,5 +1,6 @@
 import { colors } from "@/constants/theme";
 import { Ionicons } from "@expo/vector-icons";
+import { Image } from "expo-image";
 import { LinearGradient } from "expo-linear-gradient";
 import React from "react";
 import { FlatList, Keyboard, StyleSheet, Text, View } from "react-native";
@@ -8,6 +9,7 @@ import Pressable from "./ResponsivePressable";
 export interface SearchSuggestion {
     id: string;
     text: string;
+    thumbnailUrl?: string;
     type?: "history" | "suggestion";
 }
 
@@ -54,6 +56,20 @@ export function SearchSuggestions({
                         {item.text}
                     </Text>
                 </View>
+
+                {item.thumbnailUrl && (
+                    <View className="mr-3">
+                        <Image
+                            source={{ uri: item.thumbnailUrl }}
+                            style={{
+                                width: 56,
+                                height: 32,
+                                borderRadius: 4,
+                            }}
+                            contentFit="cover"
+                        />
+                    </View>
+                )}
 
                 {/* Right Action Icon */}
                 {onSuggestionInsert && (

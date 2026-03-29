@@ -113,7 +113,7 @@ const UnifiedFilterBar: React.FC<UnifiedFilterBarProps> = ({
     }[] = [
             { id: null, name: "All", iconName: "globe" },
             ...sortedChannels.map((ch) => ({
-                id: ch.$id,
+                id: ch.youtubeChannelId,
                 name: ch.name,
                 iconName: "tv" as keyof typeof Ionicons.glyphMap,
             })),
