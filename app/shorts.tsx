@@ -166,7 +166,7 @@ export default function ShortsScreen() {
                 duration: 300,
             });
 
-            // Show them back when leaving
+            // Show them back when leaving and pause all videos
             return () => {
                 tabBarTranslateY.value = withTiming(0, {
                     duration: 300,
@@ -174,6 +174,9 @@ export default function ShortsScreen() {
                 headerTranslateY.value = withTiming(0, {
                     duration: 300,
                 });
+
+                // Pause all videos when leaving shorts screen
+                setActiveIndex(-1);
             };
         }, [tabBarTranslateY, tabBarHeight, headerTranslateY, headerHeight])
     );

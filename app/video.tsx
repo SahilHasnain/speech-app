@@ -15,6 +15,7 @@ import {
     StyleSheet,
     View,
 } from "react-native";
+import { withTiming } from "react-native-reanimated";
 import { SafeAreaView } from "react-native-safe-area-context";
 
 export default function VideoScreen() {
@@ -45,14 +46,22 @@ export default function VideoScreen() {
     const videoUrl = `${endpoint}/storage/buckets/video-files/files/${videoId}/view?project=${projectId}`;
 
     // Get tab bar visibility context
-    const { showTabBar, tabBarHeight } = useTabBarVisibility();
+    const { translateY: tabBarTranslateY, tabBarHeight } = useTabBarVisibility();
 
-    // Force tab bar to show when this screen is focused
+    // Hide tab bar when this screen is focused
     useFocusEffect(
         React.useCallback(() => {
-            showTabBar();
+            // Hide tab bar by moving it down
+            tabBarTranslateY.value = withTiming(tabBarHeight + 50, {
+                duration: 300,
+            });
 
             return () => {
+                // Show tab bar when leaving
+                tabBarTranslateY.value = withTiming(0, {
+                    duration: 300,
+                });
+
                 const player = videoRef.current;
                 if (!player) {
                     return;
@@ -72,7 +81,7 @@ export default function VideoScreen() {
                     });
                 }
             };
-        }, [showTabBar]),
+        }, [tabBarTranslateY, tabBarHeight]),
     );
 
     React.useEffect(() => {
