@@ -21,7 +21,6 @@ export function useSearch(channelId: string | null = null): UseSearchReturn {
                 Query.limit(SEARCH_FETCH_LIMIT),
                 Query.offset(0),
                 Query.orderDesc("uploadDate"),
-                Query.equal("isShort", false),
             ];
 
             if (channelId) {
@@ -35,7 +34,9 @@ export function useSearch(channelId: string | null = null): UseSearchReturn {
             );
 
             if (isMountedRef.current) {
-                allSpeechesRef.current = response.documents as unknown as Speech[];
+                allSpeechesRef.current = (response.documents as unknown as Speech[]).filter(
+                    (speech) => (speech as Speech & { isShort?: boolean | null }).isShort !== true
+                );
             }
         } catch (error) {
             console.error("Failed to load speeches for search:", error);

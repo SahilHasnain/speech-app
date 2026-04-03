@@ -91,7 +91,6 @@ export function useSpeeches(
         Query.limit(limit),
         Query.offset(offset),
         Query.isNotNull("videoId"), // Only fetch speeches with uploaded videos
-        Query.equal("isShort", false),
       ];
 
       // Add sorting based on filter
@@ -109,7 +108,9 @@ export function useSpeeches(
         queries
       );
 
-      return response.documents as unknown as Speech[];
+      return (response.documents as unknown as Speech[]).filter(
+        (speech) => (speech as Speech & { isShort?: boolean | null }).isShort !== true
+      );
     },
     []
   );
@@ -176,7 +177,7 @@ export function useSpeeches(
         isLoadingRef.current = false;
 
         console.log(
-          `[ForYou] Using cached list, displaying ${pageSpeeches.length} speeches, ${cachedOrderedList.length - endIndex} remaining`
+          `[ForYou] Using cached list, displaying ${pageSpeeches.length} speeches, ${Math.max(0, cachedOrderedList.length - endIndex)} remaining`
         );
         return;
       }
@@ -216,7 +217,7 @@ export function useSpeeches(
           setHasMore(endIndex < orderedSpeeches.length);
 
           console.log(
-            `[ForYou] Displaying ${pageSpeeches.length} speeches, ${orderedSpeeches.length - endIndex} remaining`
+            `[ForYou] Displaying ${pageSpeeches.length} speeches, ${Math.max(0, orderedSpeeches.length - endIndex)} remaining`
           );
 
           // Background fetch: Get remaining speeches if there are more
@@ -390,7 +391,7 @@ export function useSpeeches(
         setHasMore(PAGE_SIZE < orderedSpeeches.length);
 
         console.log(
-          `[ForYou Refresh] Displaying ${freshSpeeches.length} speeches, ${orderedSpeeches.length - PAGE_SIZE} remaining`
+          `[ForYou Refresh] Displaying ${freshSpeeches.length} speeches, ${Math.max(0, orderedSpeeches.length - PAGE_SIZE)} remaining`
         );
 
         // Background fetch remaining speeches if there are more
