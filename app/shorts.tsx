@@ -3,6 +3,7 @@ import EmptyState from "@/components/EmptyState";
 import { colors } from "@/constants/theme";
 import { useHeaderVisibility } from "@/contexts/HeaderVisibilityContext.animated";
 import { useTabBarVisibility } from "@/contexts/TabBarVisibilityContext.animated";
+import { useSeenShorts } from "@/hooks/useSeenShorts";
 import { useShorts } from "@/hooks/useShorts";
 import { getProgress, saveProgress } from "@/services/progressTracking";
 import { Speech } from "@/types";
@@ -28,9 +29,10 @@ const { height: SCREEN_HEIGHT } = Dimensions.get("window");
 interface ShortItemProps {
     speech: Speech;
     isActive: boolean;
+    onWatchProgress: (shortId: string, percentage: number) => void;
 }
 
-const ShortItem = React.memo(({ speech, isActive }: ShortItemProps) => {
+const ShortItem = React.memo(({ speech, isActive, onWatchProgress }: ShortItemProps) => {
     const videoRef = useRef<VideoPlayer>(null);
     const [initialPosition, setInitialPosition] = React.useState(0);
     const lastSavedProgressRef = React.useRef<number>(0);
@@ -84,6 +86,22 @@ const ShortItem = React.memo(({ speech, isActive }: ShortItemProps) => {
         }
     }, [isActive, speech.$id]);
 
+    // Cleanup on unmount
+    React.useEffect(() => {
+        return () => {
+            const player = videoRef.current;
+            if (player) {
+                player.pause();
+                // Save final progress
+                if (speech.$id && player.duration > 0) {
+                    saveProgress(speech.$id, player.currentTime, player.duration).catch(
+                        console.error
+                    );
+                }
+            }
+        };
+    }, [speech.$id]);
+
     return (
         <View style={[styles.shortContainer, { height: SCREEN_HEIGHT }]}>
             <CustomVideoPlayer
@@ -93,18 +111,24 @@ const ShortItem = React.memo(({ speech, isActive }: ShortItemProps) => {
                 initialPosition={initialPosition}
                 autoPlay={false}
                 minimal={true}
+                loop={true}
                 onTimeUpdate={async (currentTime, duration) => {
-                    if (
-                        isActive &&
-                        duration > 0 &&
-                        Math.abs(currentTime - lastSavedProgressRef.current) >= 5
-                    ) {
-                        await saveProgress(speech.$id, currentTime, duration);
-                        lastSavedProgressRef.current = currentTime;
+                    if (isActive && duration > 0) {
+                        // Calculate watch percentage
+                        const percentage = (currentTime / duration) * 100;
+                        onWatchProgress(speech.$id, percentage);
+
+                        // Save progress periodically
+                        if (Math.abs(currentTime - lastSavedProgressRef.current) >= 5) {
+                            await saveProgress(speech.$id, currentTime, duration);
+                            lastSavedProgressRef.current = currentTime;
+                        }
                     }
                 }}
                 onEnd={() => {
                     if (speech.$id && videoRef.current) {
+                        // Mark as 100% watched
+                        onWatchProgress(speech.$id, 100);
                         saveProgress(
                             speech.$id,
                             videoRef.current.duration,
@@ -120,11 +144,15 @@ const ShortItem = React.memo(({ speech, isActive }: ShortItemProps) => {
 ShortItem.displayName = "ShortItem";
 
 export default function ShortsScreen() {
-    const { shorts, loading, error, hasMore, loadMore, refresh } = useShorts();
+    const { seenShortIds, markAsSeen, loading: seenLoading } = useSeenShorts();
+    const { shorts, loading, error, hasMore, loadMore, refresh, getStats } = useShorts({
+        seenShortIds,
+    });
     const { translateY: tabBarTranslateY, tabBarHeight } = useTabBarVisibility();
     const { translateY: headerTranslateY, headerHeight } = useHeaderVisibility();
     const [activeIndex, setActiveIndex] = React.useState(0);
     const flatListRef = useRef<FlatList>(null);
+    const watchProgressRef = useRef<Map<string, number>>(new Map());
 
     // Hide tab bar and header when shorts screen is focused
     useFocusEffect(
@@ -150,10 +178,36 @@ export default function ShortsScreen() {
         }, [tabBarTranslateY, tabBarHeight, headerTranslateY, headerHeight])
     );
 
+    // Handle watch progress and mark as seen
+    const handleWatchProgress = useCallback(
+        (shortId: string, percentage: number) => {
+            watchProgressRef.current.set(shortId, percentage);
+
+            // Mark as seen when watched > 80%
+            if (percentage >= 80 && !seenShortIds.includes(shortId)) {
+                markAsSeen(shortId);
+                console.log(`✅ Marked short as seen: ${shortId} (${percentage.toFixed(0)}%)`);
+            }
+        },
+        [markAsSeen, seenShortIds]
+    );
+
     const onViewableItemsChanged = useRef(
         ({ viewableItems }: { viewableItems: ViewToken[] }) => {
             if (viewableItems.length > 0 && viewableItems[0].index !== null) {
-                setActiveIndex(viewableItems[0].index);
+                const newIndex = viewableItems[0].index;
+                setActiveIndex(newIndex);
+
+                // Mark previous short as seen if watched enough
+                if (newIndex > 0) {
+                    const prevShort = shorts[newIndex - 1];
+                    if (prevShort) {
+                        const watchedPercentage = watchProgressRef.current.get(prevShort.$id) || 0;
+                        if (watchedPercentage >= 80 && !seenShortIds.includes(prevShort.$id)) {
+                            markAsSeen(prevShort.$id);
+                        }
+                    }
+                }
             }
         }
     ).current;
@@ -164,9 +218,13 @@ export default function ShortsScreen() {
 
     const renderShort = useCallback(
         ({ item, index }: { item: Speech; index: number }) => (
-            <ShortItem speech={item} isActive={index === activeIndex} />
+            <ShortItem
+                speech={item}
+                isActive={index === activeIndex}
+                onWatchProgress={handleWatchProgress}
+            />
         ),
-        [activeIndex]
+        [activeIndex, handleWatchProgress]
     );
 
     const renderFooter = () => {
@@ -179,7 +237,7 @@ export default function ShortsScreen() {
     };
 
     const renderEmpty = () => {
-        if (loading && shorts.length === 0) {
+        if ((loading || seenLoading) && shorts.length === 0) {
             return (
                 <View style={styles.emptyContainer}>
                     <ActivityIndicator size="large" color={colors.accent.secondary} />
@@ -197,6 +255,24 @@ export default function ShortsScreen() {
                 />
             );
         }
+
+        // Check if exhausted
+        const stats = getStats();
+        if (stats.isExhausted && shorts.length === 0) {
+            return (
+                <View style={styles.emptyContainer}>
+                    <Text style={styles.caughtUpEmoji}>🎉</Text>
+                    <Text style={styles.caughtUpText}>You're all caught up!</Text>
+                    <Text style={styles.caughtUpSubtext}>
+                        You've seen all available shorts.
+                    </Text>
+                    <Text style={styles.caughtUpSubtext}>
+                        Check back later for new content!
+                    </Text>
+                </View>
+            );
+        }
+
         return (
             <EmptyState
                 message="No shorts available yet. Check back soon!"
@@ -262,11 +338,28 @@ const styles = StyleSheet.create({
         height: SCREEN_HEIGHT,
         justifyContent: "center",
         alignItems: "center",
+        paddingHorizontal: 40,
     },
     emptyText: {
         marginTop: 16,
         fontSize: 16,
         color: colors.text.secondary,
+    },
+    caughtUpEmoji: {
+        fontSize: 64,
+        marginBottom: 16,
+    },
+    caughtUpText: {
+        fontSize: 24,
+        fontWeight: "700",
+        color: colors.text.primary,
+        marginBottom: 8,
+    },
+    caughtUpSubtext: {
+        fontSize: 16,
+        color: colors.text.secondary,
+        textAlign: "center",
+        marginTop: 4,
     },
     footer: {
         height: SCREEN_HEIGHT,
