@@ -35,7 +35,6 @@ function question(query) {
 // Configuration
 const config = {
   youtubeApiKey: process.env.YOUTUBE_API_KEY,
-  channelIds: process.env.YOUTUBE_CHANNEL_IDS,
   appwriteEndpoint: process.env.EXPO_PUBLIC_APPWRITE_ENDPOINT,
   appwriteProjectId: process.env.EXPO_PUBLIC_APPWRITE_PROJECT_ID,
   appwriteApiKey: process.env.APPWRITE_API_KEY,
@@ -62,13 +61,6 @@ function validateEnv() {
     console.error("❌ Missing required environment variables:");
     missing.forEach((key) => console.error(`   - ${key}`));
     console.error("\n💡 Please add these to your .env.local or functions/.env file");
-    process.exit(1);
-  }
-
-  if (!process.env.YOUTUBE_CHANNEL_IDS) {
-    console.error("❌ Missing YOUTUBE_CHANNEL_IDS environment variable");
-    console.error("   Add comma-separated YouTube channel IDs to .env.local");
-    console.error("   Example: YOUTUBE_CHANNEL_IDS=UCChannelID1,UCChannelID2");
     process.exit(1);
   }
 }
@@ -473,7 +465,7 @@ async function updateSpeechViews(databases, documentId, newViews) {
 }
 
 // Process a single source (channel or playlist)
-async function ingestSourceSpeeches(databases, existingMap, source, maxResults = 5000) {
+async function ingestSourceSpeeches(databases, existingMap, source, maxResults = 5000, ingestMode = "all") {
   const sourceType = source.type || "channel";
   const sourceId = source.youtubeChannelId;
   const sourceName = source.name;
@@ -508,15 +500,30 @@ async function ingestSourceSpeeches(databases, existingMap, source, maxResults =
     const { youtubeId, title, duration, views: newViews } = video;
 
     try {
-      // Universal filter: Skip shorts (< 60 seconds) - always applied
-      if (!(source.includeShorts || false) && duration < 60) {
-        console.log(`   🚫 Filtered: ${title} (duration ${duration}s < 60s, likely short)`);
+      const isShort = duration < 60;
+
+      // Apply ingest mode filter
+      if (ingestMode === "shorts" && !isShort) {
+        console.log(`   🚫 Filtered: ${title} (${duration}s, not a short)`);
+        filteredDurationCount++;
+        continue;
+      }
+      
+      if (ingestMode === "speeches" && isShort) {
+        console.log(`   🚫 Filtered: ${title} (${duration}s, is a short)`);
+        filteredDurationCount++;
+        continue;
+      }
+
+      // Universal filter: Skip shorts (< 60 seconds) if channel doesn't include shorts
+      if (!(source.includeShorts || false) && isShort) {
+        console.log(`   🚫 Filtered: ${title} (duration ${duration}s < 60s, channel excludes shorts)`);
         filteredDurationCount++;
         continue;
       }
 
       // Duration filter: Only apply if ignoreDuration is false
-      if (!ignoreDuration) {
+      if (!ignoreDuration && !isShort) {
         // Filter: Only speeches ≤5 minutes (300 seconds)
         if (duration > 300) {
           console.log(`   🚫 Filtered: ${title} (duration ${duration}s > 300s)`);
@@ -542,8 +549,8 @@ async function ingestSourceSpeeches(databases, existingMap, source, maxResults =
       } else {
         // New speech - insert it
         try {
-          await createSpeechDocument(databases, video, channelId, channelName);
-          console.log(`   ✅ Added: ${title} (${newViews} views, ${duration}s)`);
+          await createSpeechDocument(databases, video, sourceId, channelName);
+          console.log(`   ✅ Added: ${title} (${newViews} views, ${duration}s${isShort ? ', SHORT' : ''})`);
           newCount++;
         } catch (createError) {
           // Handle duplicate (race condition)
@@ -584,16 +591,48 @@ async function ingestSpeeches() {
     validateEnv();
     console.log("✅ Environment variables validated");
 
-    // Parse channel IDs
-    const channelIds = config.channelIds
-      .split(",")
-      .map((id) => id.trim())
-      .filter((id) => id);
+    const databases = initAppwrite();
+    console.log("✅ Appwrite client initialized");
 
-    console.log(`✅ Found ${channelIds.length} channel(s) to process`);
+    // Fetch all sources (channels/playlists) from database
+    console.log("\n📦 Fetching sources from database...");
+    const sourcesResponse = await databases.listDocuments(
+      config.databaseId,
+      config.channelsCollectionId,
+      [Query.limit(100)]
+    );
+    
+    const sources = sourcesResponse.documents;
+    console.log(`✅ Found ${sources.length} source(s) to process`);
+
+    if (sources.length === 0) {
+      console.log("\n⚠️  No sources found in database.");
+      console.log("   Run 'npm run add:channel' to add channels or playlists first.");
+      rl.close();
+      process.exit(0);
+    }
+
+    // Ask what to ingest
+    console.log("\n📊 What do you want to ingest?");
+    console.log("   1. Shorts only (< 60 seconds)");
+    console.log("   2. Speeches only (≥ 60 seconds)");
+    console.log("   3. All (both shorts and speeches)");
+    const ingestChoice = await question("\nChoice (1/2/3, default: 3): ");
+    
+    let ingestMode = "all";
+    if (ingestChoice.trim() === "1") {
+      ingestMode = "shorts";
+      console.log("✅ Will ingest shorts only");
+    } else if (ingestChoice.trim() === "2") {
+      ingestMode = "speeches";
+      console.log("✅ Will ingest speeches only");
+    } else {
+      ingestMode = "all";
+      console.log("✅ Will ingest all videos");
+    }
 
     // Ask for number of videos to process
-    console.log("\n📊 How many videos do you want to process per channel?");
+    console.log("\n📊 How many videos do you want to process per source?");
     console.log("   Enter a number (e.g., 100) or press Enter for all videos");
     const limitInput = await question("Limit (default: all): ");
     
@@ -602,7 +641,7 @@ async function ingestSpeeches() {
       const parsed = parseInt(limitInput.trim(), 10);
       if (!isNaN(parsed) && parsed > 0) {
         maxResults = parsed;
-        console.log(`✅ Will process up to ${maxResults} videos per channel`);
+        console.log(`✅ Will process up to ${maxResults} videos per source`);
       } else {
         console.log("⚠️  Invalid number, processing all videos");
       }
@@ -610,18 +649,15 @@ async function ingestSpeeches() {
       console.log("✅ Will process all videos");
     }
 
-    const databases = initAppwrite();
-    console.log("✅ Appwrite client initialized");
-
     console.log("\n📦 Fetching existing speeches from database...");
     const existingMap = await getAllExistingSpeeches(databases);
     console.log(`✅ Found ${existingMap.size} existing speeches in database`);
 
     // Process each source
     const sourceResults = [];
-    for (const source of sources.documents) {
+    for (const source of sources) {
       try {
-        const result = await ingestSourceSpeeches(databases, existingMap, source, maxResults);
+        const result = await ingestSourceSpeeches(databases, existingMap, source, maxResults, ingestMode);
         sourceResults.push(result);
       } catch (error) {
         console.error(`\n❌ Error processing source ${source.youtubeChannelId}:`, error.message);

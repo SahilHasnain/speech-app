@@ -15,6 +15,7 @@ export interface Speech {
   tags?: string[];
   language?: string;
   topic?: string;
+  isShort?: boolean; // Videos < 60 seconds
 }
 
 export interface Channel {
@@ -25,6 +26,7 @@ export interface Channel {
   description?: string;
   type: "channel" | "playlist";
   ignoreDuration?: boolean;
+  includeShorts?: boolean; // Include shorts (< 60s) for this channel
 }
 
 // Download metadata

@@ -22,9 +22,21 @@ const { existsSync, mkdirSync, unlinkSync, statSync } = require("fs");
 const { Client, Databases, Query, Storage, ID } = require("node-appwrite");
 const { InputFile } = require("node-appwrite/file");
 const { dirname, extname, join, basename } = require("path");
+const readline = require("readline");
 
 // Load environment variables
 dotenv.config({ path: ".env.local" });
+
+// Create readline interface
+const rl = readline.createInterface({
+  input: process.stdin,
+  output: process.stdout,
+});
+
+// Promisify question
+function question(query) {
+  return new Promise((resolve) => rl.question(query, resolve));
+}
 
 // Configuration
 const APPWRITE_ENDPOINT = process.env.EXPO_PUBLIC_APPWRITE_ENDPOINT;
@@ -322,7 +334,7 @@ async function processSpeech(speech, index, total) {
 /**
  * Fetch all speeches without videoId using pagination
  */
-async function fetchAllSpeechesWithoutVideo(userLimit = null) {
+async function fetchAllSpeechesWithoutVideo(userLimit = null, uploadMode = "all") {
   const BATCH_SIZE = 100;
   let allSpeeches = [];
   let offset = 0;
@@ -343,7 +355,16 @@ async function fetchAllSpeechesWithoutVideo(userLimit = null) {
       queries
     );
 
-    const batch = response.documents;
+    let batch = response.documents;
+    
+    // Filter based on upload mode
+    if (uploadMode === "shorts") {
+      batch = batch.filter(speech => speech.duration < 60);
+    } else if (uploadMode === "speeches") {
+      batch = batch.filter(speech => speech.duration >= 60);
+    }
+    // "all" mode doesn't filter
+    
     allSpeeches.push(...batch);
 
     console.log(
@@ -351,7 +372,7 @@ async function fetchAllSpeechesWithoutVideo(userLimit = null) {
     );
 
     // Check if we should continue
-    hasMore = batch.length === BATCH_SIZE;
+    hasMore = response.documents.length === BATCH_SIZE;
     offset += BATCH_SIZE;
 
     // If user specified a limit, stop when we reach it
@@ -381,15 +402,35 @@ async function main() {
     `  Mode: ${testMode ? "Test (no upload)" : "Full (download + upload)"}\n`
   );
 
+  // Ask what to upload
+  console.log("📊 What do you want to upload?");
+  console.log("   1. Shorts only (< 60 seconds)");
+  console.log("   2. Speeches only (≥ 60 seconds)");
+  console.log("   3. All (both shorts and speeches)");
+  const uploadChoice = await question("\nChoice (1/2/3, default: 3): ");
+  
+  let uploadMode = "all";
+  if (uploadChoice.trim() === "1") {
+    uploadMode = "shorts";
+    console.log("✅ Will upload shorts only\n");
+  } else if (uploadChoice.trim() === "2") {
+    uploadMode = "speeches";
+    console.log("✅ Will upload speeches only\n");
+  } else {
+    uploadMode = "all";
+    console.log("✅ Will upload all videos\n");
+  }
+
   // Ensure temp directory exists
   ensureTempDir();
 
   // Fetch all speeches without video using pagination
-  const speeches = await fetchAllSpeechesWithoutVideo(limit);
+  const speeches = await fetchAllSpeechesWithoutVideo(limit, uploadMode);
   console.log(`✓ Found ${speeches.length} speeches without video\n`);
 
   if (speeches.length === 0) {
     console.log("No speeches to process. All videos already uploaded!");
+    rl.close();
     return;
   }
 
@@ -428,6 +469,8 @@ async function main() {
   } else {
     console.log("\n✅ Done! All video files uploaded to Appwrite Storage");
   }
+  
+  rl.close();
 }
 
 // Run the script

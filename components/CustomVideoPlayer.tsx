@@ -17,6 +17,8 @@ interface CustomVideoPlayerProps {
   onReadyForDisplay?: () => void;
   onError?: (error: string) => void;
   initialPosition?: number;
+  autoPlay?: boolean; // Control whether video auto-plays when ready
+  minimal?: boolean; // Minimal UI for shorts (no progress bar, no seek buttons, no time)
 }
 
 const CONTROL_HIDE_DELAY_MS = 2500;
@@ -43,6 +45,8 @@ export const CustomVideoPlayer = React.forwardRef<
       onReadyForDisplay,
       onError,
       initialPosition = 0,
+      autoPlay = true,
+      minimal = false,
     },
     ref
   ) => {
@@ -110,7 +114,9 @@ export const CustomVideoPlayer = React.forwardRef<
           }
           startedAtInitialPositionRef.current = true;
           onReadyForDisplay?.();
-          player.play();
+          if (autoPlay) {
+            player.play();
+          }
         } else if (status === "loading") {
           setIsLoading(true);
         } else if (status === "error") {
@@ -153,6 +159,7 @@ export const CustomVideoPlayer = React.forwardRef<
         endSubscription.remove();
       };
     }, [
+      autoPlay,
       clearHideTimer,
       duration,
       initialPosition,
@@ -235,14 +242,16 @@ export const CustomVideoPlayer = React.forwardRef<
             {controlsVisible ? (
               <View style={styles.centerControlsWrap} pointerEvents="box-none">
                 <View style={styles.centerControls}>
-                  <Pressable
-                    onPress={() => seekBy(-10)}
-                    style={styles.secondaryButton}
-                    accessibilityRole="button"
-                    accessibilityLabel="Seek back 10 seconds"
-                  >
-                    <MaterialIcons name="replay-10" size={32} color={colors.text.primary} />
-                  </Pressable>
+                  {!minimal && (
+                    <Pressable
+                      onPress={() => seekBy(-10)}
+                      style={styles.secondaryButton}
+                      accessibilityRole="button"
+                      accessibilityLabel="Seek back 10 seconds"
+                    >
+                      <MaterialIcons name="replay-10" size={32} color={colors.text.primary} />
+                    </Pressable>
+                  )}
 
                   <Pressable
                     onPress={togglePlayback}
@@ -257,21 +266,23 @@ export const CustomVideoPlayer = React.forwardRef<
                     />
                   </Pressable>
 
-                  <Pressable
-                    onPress={() => seekBy(10)}
-                    style={styles.secondaryButton}
-                    accessibilityRole="button"
-                    accessibilityLabel="Seek forward 10 seconds"
-                  >
-                    <MaterialIcons name="forward-10" size={32} color={colors.text.primary} />
-                  </Pressable>
+                  {!minimal && (
+                    <Pressable
+                      onPress={() => seekBy(10)}
+                      style={styles.secondaryButton}
+                      accessibilityRole="button"
+                      accessibilityLabel="Seek forward 10 seconds"
+                    >
+                      <MaterialIcons name="forward-10" size={32} color={colors.text.primary} />
+                    </Pressable>
+                  )}
                 </View>
               </View>
             ) : (
               <View />
             )}
 
-            {controlsVisible ? (
+            {!minimal && controlsVisible ? (
               <View
                 style={[
                   styles.bottomOverlay,

@@ -95,6 +95,19 @@ function RootLayoutContent() {
           initialParams={{ setSelectedSort }}
         />
         <Tabs.Screen
+          name="shorts"
+          options={{
+            title: "Shorts",
+            tabBarIcon: ({ color, focused }) => (
+              <Ionicons
+                name={focused ? "play-circle" : "play-circle-outline"}
+                size={24}
+                color={color}
+              />
+            ),
+          }}
+        />
+        <Tabs.Screen
           name="history"
           options={{
             title: "History",
