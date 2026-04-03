@@ -141,6 +141,8 @@ export default function HomeScreen() {
     const handleSpeechPress = async (speechId: string) => {
         const speech = filters.displayData.find((s) => s.$id === speechId);
         if (!speech) return;
+        const currentIndex = filters.displayData.findIndex((s) => s.$id === speechId);
+        const feedIds = filters.displayData.map((s) => s.$id).join(",");
 
         // Track watch history
         await storageService.addToWatchHistory(speech.$id);
@@ -153,6 +155,8 @@ export default function HomeScreen() {
                 channelName: speech.channelName,
                 thumbnailUrl: speech.thumbnailUrl,
                 speechId: speech.$id,
+                currentIndex: String(currentIndex),
+                feedIds,
             },
         });
     };

@@ -21,7 +21,7 @@ const dotenv = require("dotenv");
 const { existsSync, mkdirSync, unlinkSync, statSync } = require("fs");
 const { Client, Databases, Query, Storage, ID } = require("node-appwrite");
 const { InputFile } = require("node-appwrite/file");
-const { join } = require("path");
+const { dirname, extname, join, basename } = require("path");
 
 // Load environment variables
 dotenv.config({ path: ".env.local" });
@@ -62,6 +62,97 @@ const client = new Client()
 const databases = new Databases(client);
 const storage = new Storage(client);
 
+function runCommand(command, args) {
+  return new Promise((resolve, reject) => {
+    const child = spawn(command, args);
+    let stdout = "";
+    let stderr = "";
+
+    child.stdout.on("data", (data) => {
+      stdout += data.toString();
+    });
+
+    child.stderr.on("data", (data) => {
+      stderr += data.toString();
+    });
+
+    child.on("close", (code) => {
+      if (code === 0) {
+        resolve({ stdout, stderr });
+      } else {
+        reject(
+          new Error(`${command} failed with code ${code}${stderr ? `: ${stderr}` : ""}`)
+        );
+      }
+    });
+
+    child.on("error", (err) => {
+      reject(new Error(`Failed to spawn ${command}: ${err.message}`));
+    });
+  });
+}
+
+async function getVideoCodec(filePath) {
+  const { stdout } = await runCommand("ffprobe", [
+    "-v",
+    "error",
+    "-select_streams",
+    "v:0",
+    "-show_entries",
+    "stream=codec_name",
+    "-of",
+    "default=noprint_wrappers=1:nokey=1",
+    filePath,
+  ]);
+
+  return stdout.trim().toLowerCase();
+}
+
+async function ensureH264Compatible(filePath) {
+  const codec = await getVideoCodec(filePath);
+  console.log(`  Video codec: ${codec || "unknown"}`);
+
+  if (codec === "h264") {
+    return filePath;
+  }
+
+  const transcodedPath = join(
+    dirname(filePath),
+    `${basename(filePath, extname(filePath))}_h264.mp4`
+  );
+
+  console.log("  Transcoding to H.264/AAC for Android compatibility...");
+
+  await runCommand("ffmpeg", [
+    "-y",
+    "-i",
+    filePath,
+    "-c:v",
+    "libx264",
+    "-preset",
+    "fast",
+    "-crf",
+    "23",
+    "-pix_fmt",
+    "yuv420p",
+    "-movflags",
+    "+faststart",
+    "-c:a",
+    "aac",
+    "-b:a",
+    "128k",
+    transcodedPath,
+  ]);
+
+  const transcodedCodec = await getVideoCodec(transcodedPath);
+  if (transcodedCodec !== "h264") {
+    throw new Error(`Transcode failed, resulting codec is ${transcodedCodec}`);
+  }
+
+  console.log("  âœ“ Transcoded successfully");
+  return transcodedPath;
+}
+
 /**
  * Ensure temp directory exists
  */
@@ -89,7 +180,7 @@ async function downloadVideo(youtubeId, title) {
     // - bestaudio: Best audio
     // - mp4: Prefer MP4 container
     // - Merge into single file
-    const formatString = `bestvideo[height<=${quality}][ext=mp4]+bestaudio[ext=m4a]/best[height<=${quality}][ext=mp4]/best`;
+    const formatString = `bestvideo[vcodec^=avc1][height<=${quality}][ext=mp4]+bestaudio[ext=m4a]/best[vcodec^=avc1][height<=${quality}][ext=mp4]/bestvideo[height<=${quality}][ext=mp4]+bestaudio[ext=m4a]/best[height<=${quality}][ext=mp4]/best`;
 
     const ytdlp = spawn("yt-dlp", [
       "-f",
@@ -195,14 +286,16 @@ async function processSpeech(speech, index, total) {
   console.log(`\n[${index + 1}/${total}] Processing: ${speech.title}`);
 
   let tempFilePath = null;
+  let uploadFilePath = null;
 
   try {
     // Download video
     tempFilePath = await downloadVideo(speech.youtubeId, speech.title);
+    uploadFilePath = await ensureH264Compatible(tempFilePath);
 
     if (!testMode) {
       // Upload to Appwrite
-      const videoFileId = await uploadVideo(tempFilePath, speech.youtubeId);
+      const videoFileId = await uploadVideo(uploadFilePath, speech.youtubeId);
 
       // Update database
       await updateSpeechWithVideoId(speech.$id, videoFileId);
@@ -219,6 +312,9 @@ async function processSpeech(speech, index, total) {
     // Cleanup temp file (unless test mode)
     if (tempFilePath && !testMode) {
       cleanupTempFile(tempFilePath);
+    }
+    if (uploadFilePath && uploadFilePath !== tempFilePath && !testMode) {
+      cleanupTempFile(uploadFilePath);
     }
   }
 }

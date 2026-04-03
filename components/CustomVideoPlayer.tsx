@@ -1,14 +1,15 @@
 import Pressable from "@/components/ResponsivePressable";
 import { colors } from "@/constants/theme";
-import { Ionicons } from "@expo/vector-icons";
+import { Ionicons, MaterialIcons } from "@expo/vector-icons";
 import Slider from "@react-native-community/slider";
 import { VideoPlayer, VideoSource, VideoView, useVideoPlayer } from "expo-video";
 import React from "react";
 import { ActivityIndicator, StyleSheet, Text, View } from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 interface CustomVideoPlayerProps {
   videoUrl: string;
-  title?: string;
+  bottomOffset?: number;
   onTimeUpdate?: (currentTime: number, duration: number) => void;
   onPlayingChange?: (isPlaying: boolean) => void;
   onLoad?: (duration: number) => void;
@@ -34,7 +35,7 @@ export const CustomVideoPlayer = React.forwardRef<
   (
     {
       videoUrl,
-      title,
+      bottomOffset = 0,
       onTimeUpdate,
       onPlayingChange,
       onLoad,
@@ -45,6 +46,7 @@ export const CustomVideoPlayer = React.forwardRef<
     },
     ref
   ) => {
+    const insets = useSafeAreaInsets();
     const [controlsVisible, setControlsVisible] = React.useState(true);
     const [isLoading, setIsLoading] = React.useState(true);
     const [hasError, setHasError] = React.useState(false);
@@ -58,9 +60,8 @@ export const CustomVideoPlayer = React.forwardRef<
       () => ({
         uri: videoUrl,
         useCaching: true,
-        metadata: title ? { title } : undefined,
       }),
-      [title, videoUrl]
+      [videoUrl]
     );
 
     const player = useVideoPlayer(source, (instance) => {
@@ -208,12 +209,12 @@ export const CustomVideoPlayer = React.forwardRef<
     );
 
     return (
-      <Pressable style={styles.container} onPress={handleToggleControls}>
+      <View style={styles.container}>
         <VideoView
           player={player}
           style={styles.video}
           nativeControls={false}
-          contentFit="contain"
+          contentFit="cover"
           fullscreenOptions={{ enable: true, orientation: "landscape" }}
           useExoShutter={false}
           onFirstFrameRender={() => {
@@ -222,64 +223,80 @@ export const CustomVideoPlayer = React.forwardRef<
           }}
         />
 
-        {controlsVisible && !hasError ? (
+        {!hasError ? (
           <View pointerEvents="box-none" style={styles.overlay}>
-            <View style={styles.topOverlay}>
-              <Text numberOfLines={1} style={styles.title}>
-                {title || "Video"}
-              </Text>
-            </View>
+            <Pressable
+              style={StyleSheet.absoluteFill}
+              onPress={handleToggleControls}
+              accessibilityRole="button"
+              accessibilityLabel={controlsVisible ? "Hide controls" : "Show controls"}
+            />
 
-            <View style={styles.centerControls}>
-              <Pressable
-                onPress={() => seekBy(-10)}
-                style={styles.secondaryButton}
-                accessibilityRole="button"
-                accessibilityLabel="Seek back 10 seconds"
-              >
-                <Ionicons name="play-back" size={22} color={colors.text.primary} />
-              </Pressable>
+            {controlsVisible ? (
+              <View style={styles.centerControlsWrap} pointerEvents="box-none">
+                <View style={styles.centerControls}>
+                  <Pressable
+                    onPress={() => seekBy(-10)}
+                    style={styles.secondaryButton}
+                    accessibilityRole="button"
+                    accessibilityLabel="Seek back 10 seconds"
+                  >
+                    <MaterialIcons name="replay-10" size={32} color={colors.text.primary} />
+                  </Pressable>
 
-              <Pressable
-                onPress={togglePlayback}
-                style={styles.primaryButton}
-                accessibilityRole="button"
-                accessibilityLabel={isPlaying ? "Pause video" : "Play video"}
-              >
-                <Ionicons
-                  name={isPlaying ? "pause" : "play"}
-                  size={30}
-                  color={colors.text.primary}
-                />
-              </Pressable>
+                  <Pressable
+                    onPress={togglePlayback}
+                    style={styles.primaryButton}
+                    accessibilityRole="button"
+                    accessibilityLabel={isPlaying ? "Pause video" : "Play video"}
+                  >
+                    <Ionicons
+                      name={isPlaying ? "pause" : "play"}
+                      size={30}
+                      color={colors.text.primary}
+                    />
+                  </Pressable>
 
-              <Pressable
-                onPress={() => seekBy(10)}
-                style={styles.secondaryButton}
-                accessibilityRole="button"
-                accessibilityLabel="Seek forward 10 seconds"
-              >
-                <Ionicons name="play-forward" size={22} color={colors.text.primary} />
-              </Pressable>
-            </View>
-
-            <View style={styles.bottomOverlay}>
-              <Slider
-                style={styles.slider}
-                minimumValue={0}
-                maximumValue={Math.max(duration, 0.1)}
-                value={Math.min(position, duration || position)}
-                onSlidingStart={clearHideTimer}
-                onSlidingComplete={seekTo}
-                minimumTrackTintColor={colors.accent.primary}
-                maximumTrackTintColor="rgba(255,255,255,0.28)"
-                thumbTintColor={colors.accent.primary}
-              />
-              <View style={styles.timeRow}>
-                <Text style={styles.timeText}>{formatTime(position)}</Text>
-                <Text style={styles.timeText}>{duration > 0 ? formatTime(duration) : "--:--"}</Text>
+                  <Pressable
+                    onPress={() => seekBy(10)}
+                    style={styles.secondaryButton}
+                    accessibilityRole="button"
+                    accessibilityLabel="Seek forward 10 seconds"
+                  >
+                    <MaterialIcons name="forward-10" size={32} color={colors.text.primary} />
+                  </Pressable>
+                </View>
               </View>
-            </View>
+            ) : (
+              <View />
+            )}
+
+            {controlsVisible ? (
+              <View
+                style={[
+                  styles.bottomOverlay,
+                  { paddingBottom: Math.max(insets.bottom, 12) + 20 },
+                  bottomOffset > 0 ? { bottom: bottomOffset } : null,
+                ]}
+                pointerEvents="box-none"
+              >
+                <Slider
+                  style={styles.slider}
+                  minimumValue={0}
+                  maximumValue={Math.max(duration, 0.1)}
+                  value={Math.min(position, duration || position)}
+                  onSlidingStart={clearHideTimer}
+                  onSlidingComplete={seekTo}
+                  minimumTrackTintColor={colors.accent.primary}
+                  maximumTrackTintColor="rgba(255,255,255,0.35)"
+                  thumbTintColor={colors.accent.primary}
+                />
+                <View style={styles.timeRow}>
+                  <Text style={styles.timeText}>{formatTime(position)}</Text>
+                  <Text style={styles.timeText}>{duration > 0 ? formatTime(duration) : "--:--"}</Text>
+                </View>
+              </View>
+            ) : null}
           </View>
         ) : null}
 
@@ -297,7 +314,7 @@ export const CustomVideoPlayer = React.forwardRef<
             </Text>
           </View>
         ) : null}
-      </Pressable>
+      </View>
     );
   }
 );
@@ -316,16 +333,12 @@ const styles = StyleSheet.create({
   overlay: {
     ...StyleSheet.absoluteFillObject,
     justifyContent: "space-between",
-    backgroundColor: "rgba(0, 0, 0, 0.18)",
+    zIndex: 2,
   },
-  topOverlay: {
-    paddingHorizontal: 16,
-    paddingTop: 16,
-  },
-  title: {
-    color: colors.text.primary,
-    fontSize: 15,
-    fontWeight: "600",
+  centerControlsWrap: {
+    flex: 1,
+    alignItems: "center",
+    justifyContent: "center",
   },
   centerControls: {
     flexDirection: "row",
@@ -350,12 +363,17 @@ const styles = StyleSheet.create({
     backgroundColor: "rgba(0, 0, 0, 0.42)",
   },
   bottomOverlay: {
+    position: "absolute",
+    left: 0,
+    right: 0,
+    bottom: 0,
     paddingHorizontal: 12,
-    paddingBottom: 12,
+    paddingTop: 28,
+    backgroundColor: "rgba(0, 0, 0, 0.48)",
   },
   slider: {
     width: "100%",
-    height: 32,
+    height: 36,
   },
   timeRow: {
     flexDirection: "row",
