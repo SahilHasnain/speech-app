@@ -36,7 +36,8 @@
           "resizeMode": "cover",
           "backgroundColor": "#000000"
         }
-      ]
+      ],
+      "expo-video"
     ],
     "experiments": {
       "typedRoutes": true,

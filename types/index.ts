@@ -4,6 +4,7 @@ export interface Speech {
   $id: string;
   title: string;
   youtubeId: string;
+  videoId: string; // Appwrite Storage file ID for self-hosted video
   thumbnailUrl: string;
   duration: number;
   uploadDate: string;

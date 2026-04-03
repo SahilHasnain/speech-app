@@ -148,11 +148,10 @@ export default function HomeScreen() {
         router.push({
             pathname: "/video",
             params: {
-                videoUrl: `https://www.youtube.com/watch?v=${speech.youtubeId}`,
+                videoId: speech.videoId,
                 title: speech.title,
                 channelName: speech.channelName,
                 thumbnailUrl: speech.thumbnailUrl,
-                youtubeId: speech.youtubeId,
                 speechId: speech.$id,
             },
         });

@@ -1,15 +1,15 @@
-import Pressable from "@/components/ResponsivePressable";
+import { CustomVideoPlayer } from "@/components/CustomVideoPlayer";
 import { colors, shadows } from "@/constants/theme";
 import { useTabBarVisibility } from "@/contexts/TabBarVisibilityContext.animated";
 import { getProgress, saveProgress } from "@/services/progressTracking";
-import { Ionicons } from "@expo/vector-icons";
-import Slider from "@react-native-community/slider";
+import Constants from "expo-constants";
+import { VideoPlayer } from "expo-video";
 import { LinearGradient } from "expo-linear-gradient";
-import { useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
-import * as ScreenOrientation from "expo-screen-orientation";
+import { useFocusEffect, useLocalSearchParams } from "expo-router";
 import React from "react";
 import {
     ActivityIndicator,
+    AppState,
     Alert,
     StatusBar,
     StyleSheet,
@@ -17,33 +17,35 @@ import {
     View,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
-import YoutubePlayer from "react-native-youtube-iframe";
 
 export default function VideoScreen() {
-    const router = useRouter();
     const params = useLocalSearchParams<{
-        videoUrl: string;
+        videoId: string;
         title?: string;
         channelName?: string;
         thumbnailUrl?: string;
-        youtubeId?: string;
         speechId?: string;
     }>();
 
     const [isLoading, setIsLoading] = React.useState(true);
-    const [isFullscreen, setIsFullscreen] = React.useState(false);
     const [videoPlaying, setVideoPlaying] = React.useState(false);
     const [videoDuration, setVideoDuration] = React.useState(0);
     const [videoPosition, setVideoPosition] = React.useState(0);
-    const [isRepeatEnabled, setIsRepeatEnabled] = React.useState(false);
-    const [savedProgress, setSavedProgress] = React.useState<{ progress: number; duration: number } | null>(null);
-    const [showResumeButton, setShowResumeButton] = React.useState(false);
+    const [initialPosition, setInitialPosition] = React.useState(0);
     const lastSavedProgressRef = React.useRef<number>(0);
-    const playerRef = React.useRef<any>(null);
+    const videoRef = React.useRef<VideoPlayer>(null);
+    const playingRef = React.useRef(false);
+    const speechIdRef = React.useRef<string | undefined>(undefined);
+    const videoDurationRef = React.useRef(0);
 
-    const videoUrl = params.videoUrl;
+    const videoId = params.videoId;
     const title = params.title;
     const speechId = params.speechId;
+
+    // Construct Appwrite video URL
+    const endpoint = Constants.expoConfig?.extra?.EXPO_PUBLIC_APPWRITE_ENDPOINT || "https://sgp.cloud.appwrite.io/v1";
+    const projectId = Constants.expoConfig?.extra?.EXPO_PUBLIC_APPWRITE_PROJECT_ID || "69c60b0e001c5ec5e031";
+    const videoUrl = `${endpoint}/storage/buckets/video-files/files/${videoId}/view?project=${projectId}`;
 
     // Get tab bar visibility context
     const { showTabBar } = useTabBarVisibility();
@@ -51,237 +53,138 @@ export default function VideoScreen() {
     // Force tab bar to show when this screen is focused
     useFocusEffect(
         React.useCallback(() => {
-            // Show tab bar and reset scroll tracking state
             showTabBar();
+
+            return () => {
+                const player = videoRef.current;
+                if (!player) {
+                    return;
+                }
+
+                if (player.playing) {
+                    player.pause();
+                }
+
+                if (speechIdRef.current && videoDurationRef.current > 0) {
+                    saveProgress(
+                        speechIdRef.current,
+                        player.currentTime,
+                        videoDurationRef.current,
+                    ).catch((error) => {
+                        console.error("Error saving progress on blur:", error);
+                    });
+                }
+            };
         }, [showTabBar]),
     );
 
-    // Extract YouTube video ID from URL
-    const getYouTubeId = (url: string): string => {
-        const regExp =
-            /^.*((youtu.be\/)|(v\/)|(\/u\/\w\/)|(embed\/)|(watch\?))\??v?=?([^#&?]*).*/;
-        const match = url.match(regExp);
-        return match && match[7].length === 11 ? match[7] : "";
-    };
-
-    // Format seconds to MM:SS
-    const formatTime = (seconds: number): string => {
+    const formatTime = React.useCallback((seconds: number): string => {
         const minutes = Math.floor(seconds / 60);
         const secs = Math.floor(seconds % 60);
         return `${minutes}:${secs.toString().padStart(2, "0")}`;
-    };
+    }, []);
 
-    const videoId = getYouTubeId(videoUrl);
+    React.useEffect(() => {
+        playingRef.current = videoPlaying;
+    }, [videoPlaying]);
+
+    React.useEffect(() => {
+        speechIdRef.current = speechId;
+    }, [speechId]);
+
+    React.useEffect(() => {
+        videoDurationRef.current = videoDuration;
+    }, [videoDuration]);
+
+    React.useEffect(() => {
+        const subscription = AppState.addEventListener("change", (nextState) => {
+            if (nextState === "active") {
+                return;
+            }
+
+            const player = videoRef.current;
+            if (!player) {
+                return;
+            }
+
+            if (player.playing) {
+                player.pause();
+            }
+
+            if (speechIdRef.current && videoDurationRef.current > 0) {
+                saveProgress(
+                    speechIdRef.current,
+                    player.currentTime,
+                    videoDurationRef.current,
+                ).catch((error) => {
+                    console.error("Error saving progress on app background:", error);
+                });
+            }
+        });
+
+        return () => {
+            subscription.remove();
+        };
+    }, []);
 
     // Load video on mount and autoplay
     React.useEffect(() => {
         setIsLoading(true);
         setVideoPosition(0);
         setVideoPlaying(true);
-        setSavedProgress(null);
-        setShowResumeButton(false);
+        setInitialPosition(0);
+        lastSavedProgressRef.current = 0;
 
         const loadingTimeout = setTimeout(() => {
-            if (isLoading) {
-                setIsLoading(false);
-            }
+            setIsLoading(false);
         }, 5000);
 
         return () => {
             clearTimeout(loadingTimeout);
         };
-    }, [videoUrl]);
+    }, [videoId]);
 
-    // Check for saved progress when video is ready
+    // Load saved progress and resume automatically when applicable
     React.useEffect(() => {
-        const checkSavedProgress = async () => {
-            if (!speechId || !playerRef.current || videoDuration === 0) {
+        const loadSavedProgress = async () => {
+            if (!speechId) {
                 return;
             }
 
             try {
                 const progress = await getProgress(speechId);
                 if (progress && progress.progress > 0) {
-                    // Only show resume button if progress is between 5% and 95%
                     const percentage = (progress.progress / progress.duration) * 100;
                     if (percentage >= 5 && percentage <= 95) {
-                        setSavedProgress(progress);
-                        setShowResumeButton(true);
-                        console.log(`Found saved progress: ${progress.progress}s (${percentage.toFixed(1)}%)`);
+                        setInitialPosition(progress.progress);
+                        setVideoPosition(progress.progress);
+                        lastSavedProgressRef.current = progress.progress;
+                        console.log(`Auto-resuming from ${progress.progress}s (${percentage.toFixed(1)}%)`);
                     }
                 }
             } catch (error) {
-                console.error("Failed to check saved progress:", error);
+                console.error("Failed to load saved progress:", error);
             }
         };
 
-        if (videoDuration > 0 && !savedProgress) {
-            setTimeout(checkSavedProgress, 500);
-        }
-    }, [speechId, videoDuration, savedProgress]);
-
-    // Handle fullscreen changes
-    const handleFullscreenChange = async (isFullscreen: boolean) => {
-        setIsFullscreen(isFullscreen);
-
-        if (isFullscreen) {
-            await ScreenOrientation.lockAsync(
-                ScreenOrientation.OrientationLock.LANDSCAPE,
-            );
-        } else {
-            await ScreenOrientation.unlockAsync();
-        }
-    };
+        loadSavedProgress();
+    }, [speechId, videoId]);
 
     // Cleanup: unlock orientation when screen unmounts
     React.useEffect(() => {
+        const player = videoRef.current;
         return () => {
-            if (isFullscreen) {
-                ScreenOrientation.unlockAsync();
-            }
-
-            // Save progress on unmount
-            if (speechId && videoDuration > 0 && playerRef.current) {
+            if (speechId && videoDuration > 0 && player) {
                 (async () => {
                     try {
-                        const currentTime = await playerRef.current.getCurrentTime();
-                        await saveProgress(speechId, currentTime, videoDuration);
+                        await saveProgress(speechId, player.currentTime, videoDuration);
                     } catch (error) {
                         console.error("Error saving progress on unmount:", error);
                     }
                 })();
             }
         };
-    }, [isFullscreen, speechId, videoDuration]);
-
-    // Update video position periodically
-    React.useEffect(() => {
-        const interval = setInterval(async () => {
-            if (playerRef.current) {
-                try {
-                    const currentTime = await playerRef.current.getCurrentTime();
-                    setVideoPosition(currentTime);
-
-                    if (videoDuration === 0) {
-                        try {
-                            const duration = await playerRef.current.getDuration();
-                            if (duration > 0) {
-                                setVideoDuration(duration);
-                            }
-                        } catch {
-                            // Ignore duration errors
-                        }
-                    }
-
-                    // Save progress every 10 seconds if playing
-                    if (
-                        speechId &&
-                        videoPlaying &&
-                        videoDuration > 0 &&
-                        Math.abs(currentTime - lastSavedProgressRef.current) >= 10
-                    ) {
-                        await saveProgress(speechId, currentTime, videoDuration);
-                        lastSavedProgressRef.current = currentTime;
-                    }
-                } catch {
-                    // Ignore errors
-                }
-            }
-        }, 500);
-
-        return () => clearInterval(interval);
-    }, [videoDuration, videoPlaying, speechId]);
-
-    // Handle video state changes
-    const onStateChange = React.useCallback(
-        async (state: string) => {
-            if (state === "playing") {
-                setIsLoading(false);
-                setVideoPlaying(true);
-
-                if (videoDuration === 0 && playerRef.current) {
-                    setTimeout(async () => {
-                        try {
-                            const duration = await playerRef.current.getDuration();
-                            if (duration > 0) {
-                                setVideoDuration(duration);
-                            }
-                        } catch (error) {
-                            console.error("Error getting duration:", error);
-                        }
-                    }, 1000);
-                }
-            } else if (state === "paused") {
-                setVideoPlaying(false);
-
-                // Save progress when paused
-                if (speechId && videoDuration > 0 && playerRef.current) {
-                    try {
-                        const currentTime = await playerRef.current.getCurrentTime();
-                        await saveProgress(speechId, currentTime, videoDuration);
-                    } catch (error) {
-                        console.error("Error saving progress on pause:", error);
-                    }
-                }
-            } else if (state === "ended") {
-                setVideoPlaying(false);
-
-                // Save progress when ended (will be removed if >95%)
-                if (speechId && videoDuration > 0) {
-                    try {
-                        await saveProgress(speechId, videoDuration, videoDuration);
-                    } catch (error) {
-                        console.error("Error saving progress on end:", error);
-                    }
-                }
-
-                if (isRepeatEnabled && playerRef.current) {
-                    setTimeout(async () => {
-                        try {
-                            await playerRef.current.seekTo(0, true);
-                            setVideoPlaying(true);
-                        } catch (error) {
-                            console.error("Error repeating video:", error);
-                        }
-                    }, 100);
-                }
-            }
-        },
-        [isRepeatEnabled, videoDuration, speechId],
-    );
-
-    // Seek to position in video
-    const seekToPosition = async (seconds: number) => {
-        if (playerRef.current) {
-            try {
-                await playerRef.current.seekTo(seconds, true);
-                setVideoPosition(seconds);
-            } catch {
-                // Ignore errors
-            }
-        }
-    };
-
-    const toggleRepeat = () => {
-        setIsRepeatEnabled(!isRepeatEnabled);
-    };
-
-    const handleResumeProgress = async () => {
-        if (savedProgress && playerRef.current) {
-            try {
-                await playerRef.current.seekTo(savedProgress.progress, true);
-                setVideoPosition(savedProgress.progress);
-                setShowResumeButton(false);
-                console.log(`Resumed to ${savedProgress.progress}s`);
-            } catch (error) {
-                console.error("Failed to resume progress:", error);
-            }
-        }
-    };
-
-    const handleDismissResume = () => {
-        setShowResumeButton(false);
-    };
+    }, [speechId, videoDuration]);
 
     return (
         <>
@@ -313,40 +216,68 @@ export default function VideoScreen() {
                         {/* Video Player */}
                         <View className="flex-1 bg-black">
                             <View className="relative flex-1">
-                                <YoutubePlayer
-                                    ref={playerRef}
-                                    height={300}
-                                    videoId={videoId}
-                                    play={videoPlaying}
-                                    onReady={() => {
-                                        setIsLoading(false);
-                                        if (playerRef.current) {
-                                            setTimeout(async () => {
-                                                try {
-                                                    const duration = await playerRef.current.getDuration();
-                                                    setVideoDuration(duration);
-                                                } catch (error) {
-                                                    console.error("Error getting duration:", error);
-                                                }
-                                            }, 500);
+                                <CustomVideoPlayer
+                                    ref={videoRef}
+                                    videoUrl={videoUrl}
+                                    title={title}
+                                    onTimeUpdate={async (currentTime, duration) => {
+                                        setVideoPosition(currentTime);
+                                        if (duration > 0 && videoDuration !== duration) {
+                                            setVideoDuration(duration);
+                                        }
+
+                                        if (
+                                            speechId &&
+                                            playingRef.current &&
+                                            duration > 0 &&
+                                            Math.abs(currentTime - lastSavedProgressRef.current) >= 10
+                                        ) {
+                                            await saveProgress(speechId, currentTime, duration);
+                                            lastSavedProgressRef.current = currentTime;
                                         }
                                     }}
-                                    onChangeState={onStateChange}
-                                    onFullScreenChange={handleFullscreenChange}
-                                    onError={() => {
+                                    onPlayingChange={async (playing) => {
+                                        setVideoPlaying(playing);
+
+                                        if (!playing && speechId && videoDuration > 0 && videoRef.current) {
+                                            try {
+                                                await saveProgress(
+                                                    speechId,
+                                                    videoRef.current.currentTime,
+                                                    videoDuration,
+                                                );
+                                            } catch (error) {
+                                                console.error("Error saving progress on pause:", error);
+                                            }
+                                        }
+                                    }}
+                                    onReadyForDisplay={() => {
+                                        console.log("[VideoScreen] Video ready");
+                                        setIsLoading(false);
+                                    }}
+                                    onError={(error) => {
+                                        console.error("[VideoScreen] Video error:", error);
                                         setIsLoading(false);
                                         Alert.alert(
                                             "Video Error",
-                                            "Unable to load video. Please check your internet connection and try again.",
+                                            "Unable to load video. Please check your internet connection.",
                                             [{ text: "OK" }],
                                         );
                                     }}
-                                    webViewStyle={{ opacity: isLoading ? 0 : 1 }}
-                                    initialPlayerParams={{
-                                        controls: true,
-                                        modestbranding: true,
-                                        rel: false,
+                                    onLoad={(duration) => {
+                                        console.log("[VideoScreen] Video duration:", duration);
+                                        setVideoDuration(duration);
                                     }}
+                                    onEnd={() => {
+                                        setVideoPlaying(false);
+
+                                        if (speechId && videoDuration > 0) {
+                                            saveProgress(speechId, videoDuration, videoDuration).catch((error) => {
+                                                console.error("Error saving progress on end:", error);
+                                            });
+                                        }
+                                    }}
+                                    initialPosition={initialPosition}
                                 />
 
                                 {isLoading && (
@@ -364,130 +295,10 @@ export default function VideoScreen() {
 
                             {/* Custom Video Controls */}
                             <View className="px-6 pb-24 bg-black">
-                                {/* Resume Progress Button */}
-                                {showResumeButton && savedProgress && (
-                                    <View className="mb-4">
-                                        <View
-                                            className="p-4 rounded-xl flex-row items-center justify-between"
-                                            style={{ backgroundColor: colors.accent.secondary }}
-                                        >
-                                            <View className="flex-1 mr-3">
-                                                <Text
-                                                    className="text-sm font-semibold mb-1"
-                                                    style={{ color: colors.text.primary }}
-                                                >
-                                                    Continue watching?
-                                                </Text>
-                                                <Text
-                                                    className="text-xs"
-                                                    style={{ color: colors.text.secondary }}
-                                                >
-                                                    Resume from {formatTime(savedProgress.progress)}
-                                                </Text>
-                                            </View>
-                                            <View className="flex-row gap-2">
-                                                <Pressable
-                                                    onPress={handleDismissResume}
-                                                    className="px-3 py-2 rounded-lg"
-                                                    style={{
-                                                        backgroundColor: colors.background.tertiary,
-                                                        minHeight: 36,
-                                                        minWidth: 36,
-                                                        justifyContent: 'center',
-                                                        alignItems: 'center'
-                                                    }}
-                                                    accessibilityRole="button"
-                                                    accessibilityLabel="Dismiss resume"
-                                                >
-                                                    <Ionicons
-                                                        name="close"
-                                                        size={18}
-                                                        color={colors.text.secondary}
-                                                    />
-                                                </Pressable>
-                                                <Pressable
-                                                    onPress={handleResumeProgress}
-                                                    className="px-4 py-2 rounded-lg flex-row items-center gap-1"
-                                                    style={{
-                                                        backgroundColor: colors.accent.primary,
-                                                        minHeight: 36,
-                                                        justifyContent: 'center',
-                                                        alignItems: 'center'
-                                                    }}
-                                                    accessibilityRole="button"
-                                                    accessibilityLabel="Resume playback"
-                                                >
-                                                    <Ionicons
-                                                        name="play"
-                                                        size={16}
-                                                        color={colors.text.primary}
-                                                    />
-                                                    <Text
-                                                        className="text-sm font-semibold"
-                                                        style={{ color: colors.text.primary }}
-                                                    >
-                                                        Resume
-                                                    </Text>
-                                                </Pressable>
-                                            </View>
-                                        </View>
-                                    </View>
-                                )}
-
-                                {/* Progress Bar */}
-                                <View className="mb-4">
-                                    <Slider
-                                        style={{ width: "100%", height: 40 }}
-                                        minimumValue={0}
-                                        maximumValue={videoDuration}
-                                        value={videoPosition}
-                                        onSlidingComplete={seekToPosition}
-                                        minimumTrackTintColor={colors.accent.primary}
-                                        maximumTrackTintColor={colors.background.elevated}
-                                        thumbTintColor={colors.accent.primary}
-                                    />
-
-                                    {/* Time Labels */}
-                                    <View className="flex-row justify-between">
-                                        <Text className="text-sm text-neutral-400">
-                                            {formatTime(videoPosition)}
-                                        </Text>
-                                        <Text className="text-sm text-neutral-400">
-                                            {videoDuration > 0 ? formatTime(videoDuration) : "--:--"}
-                                        </Text>
-                                    </View>
-                                </View>
-
-                                {/* Repeat Button */}
-                                <View className="mb-4 flex-row items-center justify-center">
-                                    <Pressable
-                                        onPress={toggleRepeat}
-                                        className="flex-row items-center gap-2 px-4 py-2 rounded-full bg-neutral-800"
-                                        accessibilityRole="button"
-                                        accessibilityLabel={
-                                            isRepeatEnabled ? "Repeat enabled" : "Repeat disabled"
-                                        }
-                                    >
-                                        <Ionicons
-                                            name="repeat"
-                                            size={20}
-                                            color={
-                                                isRepeatEnabled
-                                                    ? colors.accent.primary
-                                                    : colors.text.primary
-                                            }
-                                        />
-                                        <Text
-                                            className="text-sm font-medium"
-                                            style={{
-                                                color: isRepeatEnabled
-                                                    ? colors.accent.primary
-                                                    : colors.text.primary,
-                                            }}
-                                        >
-                                            Repeat
-                                        </Text>
-                                    </Pressable>
+                                <View className="mb-4 items-center">
+                                    <Text className="text-sm text-neutral-400">
+                                        {formatTime(videoPosition)} / {videoDuration > 0 ? formatTime(videoDuration) : "--:--"}
+                                    </Text>
                                 </View>
                             </View>
                         </View>

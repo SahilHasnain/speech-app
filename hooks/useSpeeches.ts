@@ -87,7 +87,11 @@ export function useSpeeches(
       offset: number,
       sortFilter: SortOption
     ): Promise<Speech[]> => {
-      const queries: string[] = [Query.limit(limit), Query.offset(offset)];
+      const queries: string[] = [
+        Query.limit(limit),
+        Query.offset(offset),
+        Query.isNotNull("videoId"), // Only fetch speeches with uploaded videos
+      ];
 
       // Add sorting based on filter
       if (sortFilter === "latest" || sortFilter === "forYou") {
