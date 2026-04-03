@@ -91,6 +91,7 @@ export function useSpeeches(
         Query.limit(limit),
         Query.offset(offset),
         Query.isNotNull("videoId"), // Only fetch speeches with uploaded videos
+        Query.equal("isShort", false),
       ];
 
       // Add sorting based on filter

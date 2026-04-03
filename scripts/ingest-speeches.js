@@ -243,7 +243,7 @@ async function fetchYouTubePlaylistVideos(playlistId, maxResults = 5000) {
 }
 
 // Fetch videos from YouTube channel
-async function fetchYouTubeVideos(channelId, maxResults = 5000) {
+async function fetchYouTubeVideos(channelId, maxResults = 5000, includeShorts = false) {
   const baseUrl = "https://www.googleapis.com/youtube/v3";
 
   try {
@@ -269,7 +269,7 @@ async function fetchYouTubeVideos(channelId, maxResults = 5000) {
       channelData.items[0].contentDetails.relatedPlaylists.uploads;
 
     // Fetch shorts video IDs to exclude them
-    const shortsIds = await getShortsVideoIds(channelId);
+    const shortsIds = includeShorts ? new Set() : await getShortsVideoIds(channelId);
 
     // Fetch videos from uploads playlist with pagination
     const allVideoItems = [];
@@ -445,6 +445,7 @@ async function createSpeechDocument(databases, video, channelId, channelName) {
     channelId: channelId,
     views: video.views,
     description: video.description,
+    isShort: video.duration < 60,
   };
 
   await databases.createDocument(
@@ -484,7 +485,7 @@ async function ingestSourceSpeeches(databases, existingMap, source, maxResults =
   if (sourceType === "playlist") {
     sourceData = await fetchYouTubePlaylistVideos(sourceId, maxResults);
   } else {
-    sourceData = await fetchYouTubeVideos(sourceId, maxResults);
+    sourceData = await fetchYouTubeVideos(sourceId, maxResults, source.includeShorts || false);
   }
   
   const { channelName, videos } = sourceData;
@@ -508,7 +509,7 @@ async function ingestSourceSpeeches(databases, existingMap, source, maxResults =
 
     try {
       // Universal filter: Skip shorts (< 60 seconds) - always applied
-      if (duration < 60) {
+      if (!(source.includeShorts || false) && duration < 60) {
         console.log(`   🚫 Filtered: ${title} (duration ${duration}s < 60s, likely short)`);
         filteredDurationCount++;
         continue;
@@ -674,7 +675,7 @@ async function ingestSpeeches() {
     console.log(`   🔄 Speeches updated: ${totalUpdated}`);
     console.log(`   ⏭️  Speeches unchanged: ${totalUnchanged}`);
     console.log(`   🚫 Videos filtered by duration: ${totalFilteredDuration}`);
-    console.log(`   ℹ️  Note: Shorts are excluded before processing`);
+    console.log(`   ℹ️  Note: Shorts are included or excluded per channel configuration`);
     console.log(`   ❌ Errors: ${totalErrors}`);
     console.log("\n✨ Ingestion complete!");
     

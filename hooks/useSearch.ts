@@ -21,6 +21,7 @@ export function useSearch(channelId: string | null = null): UseSearchReturn {
                 Query.limit(SEARCH_FETCH_LIMIT),
                 Query.offset(0),
                 Query.orderDesc("uploadDate"),
+                Query.equal("isShort", false),
             ];
 
             if (channelId) {

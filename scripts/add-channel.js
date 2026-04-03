@@ -174,6 +174,7 @@ async function addSource(databases, sourceInfo) {
         thumbnailUrl: sourceInfo.thumbnailUrl,
         description: sourceInfo.description,
         ignoreDuration: sourceInfo.ignoreDuration || false,
+        includeShorts: sourceInfo.includeShorts || false,
       },
     );
 
@@ -375,7 +376,7 @@ async function fetchPlaylistVideos(playlistId, maxResults = 5000) {
     throw new Error(`Failed to fetch playlist videos: ${error.message}`);
   }
 }
-async function fetchChannelVideos(channelId, maxResults = 5000) {
+async function fetchChannelVideos(channelId, maxResults = 5000, includeShorts = false) {
   const baseUrl = "https://www.googleapis.com/youtube/v3";
 
   try {
@@ -392,7 +393,7 @@ async function fetchChannelVideos(channelId, maxResults = 5000) {
     const uploadsPlaylistId = channelData.items[0].contentDetails.relatedPlaylists.uploads;
 
     // Fetch shorts video IDs to exclude them
-    const shortsIds = await getShortsVideoIds(channelId);
+    const shortsIds = includeShorts ? new Set() : await getShortsVideoIds(channelId);
 
     const allVideoItems = [];
     let pageToken = null;
@@ -508,19 +509,19 @@ async function getExistingSpeeches(databases) {
 }
 
 // Fetch videos from channel or playlist
-async function fetchVideos(sourceId, sourceType, maxResults = 5000) {
+async function fetchVideos(sourceId, sourceType, maxResults = 5000, includeShorts = false) {
   if (sourceType === "playlist") {
     return await fetchPlaylistVideos(sourceId, maxResults);
   } else {
-    return await fetchChannelVideos(sourceId, maxResults);
+    return await fetchChannelVideos(sourceId, maxResults, includeShorts);
   }
 }
 
 // Ingest speeches for source (channel or playlist)
-async function ingestSourceSpeeches(databases, sourceId, sourceName, sourceType, maxResults = 5000, ignoreDuration = false) {
+async function ingestSourceSpeeches(databases, sourceId, sourceName, sourceType, maxResults = 5000, ignoreDuration = false, includeShorts = false) {
   console.log(`\n📺 Fetching videos from ${sourceType}...`);
 
-  const { videos } = await fetchVideos(sourceId, sourceType, maxResults);
+  const { videos } = await fetchVideos(sourceId, sourceType, maxResults, includeShorts);
   console.log(`✅ Found ${videos.length} videos`);
 
   console.log(`📦 Checking existing speeches...`);
@@ -536,7 +537,8 @@ async function ingestSourceSpeeches(databases, sourceId, sourceName, sourceType,
   for (const video of videos) {
     try {
       // Universal filter: Skip shorts (< 60 seconds) - always applied
-      if (video.duration < 60) {
+      const isShort = video.duration < 60;
+      if (!includeShorts && isShort) {
         console.log(`   🚫 Filtered: ${video.title} (${video.duration}s < 60s, likely short)`);
         filtered++;
         continue;
@@ -584,6 +586,7 @@ async function ingestSourceSpeeches(databases, sourceId, sourceName, sourceType,
             channelId: sourceId,
             views: video.views,
             description: video.description,
+            isShort,
           },
         );
         console.log(`   ✅ Added: ${video.title} (${video.views} views, ${video.duration}s)`);
@@ -683,6 +686,7 @@ async function main() {
       
       if (existingSource.documents.length > 0) {
         sourceInfo.ignoreDuration = existingSource.documents[0].ignoreDuration || false;
+        sourceInfo.includeShorts = existingSource.documents[0].includeShorts || false;
         sourceInfo.type = existingSource.documents[0].type || "channel";
         if (sourceInfo.ignoreDuration) {
           console.log("   ⚙️  ignoreDuration is enabled for this source");
@@ -701,7 +705,7 @@ async function main() {
       // Ask about ignoreDuration setting
       console.log("\n⚙️  Duration Settings:");
       console.log("   By default, only videos between 1-5 minutes are ingested.");
-      console.log("   Shorts (< 60 seconds) are always filtered out.");
+      console.log("   Shorts can be included separately.");
       const ignoreDurationInput = await question("Ignore duration limit (allow videos > 5 minutes)? (y/n): ");
       
       sourceInfo.ignoreDuration = ignoreDurationInput.toLowerCase() === "y";
@@ -711,6 +715,9 @@ async function main() {
       } else {
         console.log("   ✅ Duration limit enabled - will only ingest videos 1-5 minutes");
       }
+
+      const includeShortsInput = await question("Include shorts (< 60 seconds)? (y/n): ");
+      sourceInfo.includeShorts = includeShortsInput.toLowerCase() === "y";
 
       console.log(`\n💾 Adding ${sourceType} to database...`);
       await addSource(databases, sourceInfo);
@@ -745,6 +752,7 @@ async function main() {
         sourceInfo.type,
         maxResults,
         sourceInfo.ignoreDuration || false,
+        sourceInfo.includeShorts || false,
       );
 
       console.log("\n═══════════════════════════════════════════════════════════");

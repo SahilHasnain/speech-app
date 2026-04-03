@@ -177,7 +177,7 @@ async function fetchYouTubePlaylistVideos(playlistId, apiKey, maxResults = 5000,
 /**
  * Fetches videos from a YouTube channel
  */
-async function fetchYouTubeVideos(channelId, apiKey, maxResults = 5000, log) {
+async function fetchYouTubeVideos(channelId, apiKey, maxResults = 5000, log, includeShorts = false) {
   const baseUrl = "https://www.googleapis.com/youtube/v3";
 
   try {
@@ -202,7 +202,7 @@ async function fetchYouTubeVideos(channelId, apiKey, maxResults = 5000, log) {
       channelData.items[0].contentDetails.relatedPlaylists.uploads;
 
     // Fetch shorts video IDs to exclude them
-    const shortsIds = await getShortsVideoIds(channelId, apiKey, log);
+    const shortsIds = includeShorts ? new Set() : await getShortsVideoIds(channelId, apiKey, log);
 
     const allVideoItems = [];
     let pageToken = null;
@@ -380,6 +380,7 @@ async function insertSpeech(
         channelId: channelId,
         views: video.views,
         description: video.description,
+        isShort: video.duration < 60,
       },
     );
 
@@ -462,6 +463,7 @@ async function processSource(
   const sourceName = source.name;
   const sourceId = source.youtubeChannelId;
   const ignoreDuration = source.ignoreDuration || false;
+  const includeShorts = source.includeShorts || false;
 
   log(`Processing ${sourceType}: ${sourceName}`);
   
@@ -486,6 +488,7 @@ async function processSource(
         youtubeApiKey,
         5000,
         log,
+        includeShorts,
       );
     }
 
@@ -507,8 +510,7 @@ async function processSource(
 
     for (const video of videos) {
       try {
-        // Universal filter: Skip shorts (< 60 seconds) - always applied
-        if (video.duration < 60) {
+        if (!includeShorts && video.duration < 60) {
           log(`Filtered: ${video.title} (duration ${video.duration}s < 60s, likely short)`);
           results.filtered++;
           continue;
