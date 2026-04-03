@@ -19,6 +19,7 @@ interface CustomVideoPlayerProps {
   initialPosition?: number;
   autoPlay?: boolean; // Control whether video auto-plays when ready
   minimal?: boolean; // Minimal UI for shorts (no progress bar, no seek buttons, no time)
+  loop?: boolean; // Loop video when it ends (like YouTube Shorts)
 }
 
 const CONTROL_HIDE_DELAY_MS = 2500;
@@ -47,6 +48,7 @@ export const CustomVideoPlayer = React.forwardRef<
       initialPosition = 0,
       autoPlay = true,
       minimal = false,
+      loop = false,
     },
     ref
   ) => {
@@ -150,6 +152,12 @@ export const CustomVideoPlayer = React.forwardRef<
       const endSubscription = player.addListener("playToEnd", () => {
         setControlsVisible(true);
         onEnd?.();
+
+        // Loop video if enabled (like YouTube Shorts)
+        if (loop) {
+          player.currentTime = 0;
+          player.play();
+        }
       });
 
       return () => {
@@ -163,6 +171,7 @@ export const CustomVideoPlayer = React.forwardRef<
       clearHideTimer,
       duration,
       initialPosition,
+      loop,
       onEnd,
       onError,
       onLoad,
