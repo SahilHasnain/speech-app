@@ -44,6 +44,7 @@ const APPWRITE_PROJECT_ID = process.env.EXPO_PUBLIC_APPWRITE_PROJECT_ID;
 const APPWRITE_API_KEY = process.env.APPWRITE_API_KEY;
 const DATABASE_ID = process.env.EXPO_PUBLIC_APPWRITE_DATABASE_ID;
 const SPEECHES_COLLECTION_ID = process.env.EXPO_PUBLIC_APPWRITE_SPEECHES_COLLECTION_ID;
+const CHANNELS_COLLECTION_ID = process.env.EXPO_PUBLIC_APPWRITE_CHANNELS_COLLECTION_ID;
 const VIDEO_BUCKET_ID = "video-files";
 
 // Parse command line arguments
@@ -334,7 +335,7 @@ async function processSpeech(speech, index, total) {
 /**
  * Fetch all speeches without videoId using pagination
  */
-async function fetchAllSpeechesWithoutVideo(userLimit = null, uploadMode = "all") {
+async function fetchAllSpeechesWithoutVideo(userLimit = null, uploadMode = "all", selectedChannelIds = null) {
   const BATCH_SIZE = 100;
   let allSpeeches = [];
   let offset = 0;
@@ -356,6 +357,11 @@ async function fetchAllSpeechesWithoutVideo(userLimit = null, uploadMode = "all"
     );
 
     let batch = response.documents;
+    
+    // Filter by selected channels if specified
+    if (selectedChannelIds && selectedChannelIds.length > 0) {
+      batch = batch.filter(speech => selectedChannelIds.includes(speech.channelId));
+    }
     
     // Filter based on upload mode
     if (uploadMode === "shorts") {
@@ -402,6 +408,52 @@ async function main() {
     `  Mode: ${testMode ? "Test (no upload)" : "Full (download + upload)"}\n`
   );
 
+  // Fetch available channels
+  console.log("📦 Fetching channels from database...");
+  const channelsResponse = await databases.listDocuments(
+    DATABASE_ID,
+    CHANNELS_COLLECTION_ID,
+    [Query.limit(100)]
+  );
+  
+  const allChannels = channelsResponse.documents;
+  console.log(`✅ Found ${allChannels.length} channel(s) in database\n`);
+
+  let selectedChannelIds = null;
+  
+  if (allChannels.length > 0) {
+    // Display available channels and let user select
+    console.log("📺 Available channels:");
+    allChannels.forEach((channel, index) => {
+      const channelType = channel.type || "channel";
+      console.log(`   ${index + 1}. ${channel.name} (${channelType}: ${channel.youtubeChannelId})`);
+    });
+    
+    console.log("\n🎯 Which channels do you want to upload videos from?");
+    console.log("   Enter numbers separated by commas (e.g., 1,3,5)");
+    console.log("   Or press Enter to upload from ALL channels");
+    const selectionInput = await question("\nSelection (default: all): ");
+    
+    if (selectionInput.trim()) {
+      const selectedIndices = selectionInput
+        .split(",")
+        .map(s => parseInt(s.trim(), 10) - 1)
+        .filter(i => !isNaN(i) && i >= 0 && i < allChannels.length);
+      
+      if (selectedIndices.length === 0) {
+        console.log("⚠️  Invalid selection, processing all channels\n");
+      } else {
+        const selectedChannels = selectedIndices.map(i => allChannels[i]);
+        selectedChannelIds = selectedChannels.map(c => c.youtubeChannelId);
+        console.log(`✅ Selected ${selectedChannels.length} channel(s):`);
+        selectedChannels.forEach(c => console.log(`   - ${c.name}`));
+        console.log("");
+      }
+    } else {
+      console.log("✅ Will process all channels\n");
+    }
+  }
+
   // Ask what to upload
   console.log("📊 What do you want to upload?");
   console.log("   1. Shorts only (< 60 seconds)");
@@ -425,7 +477,7 @@ async function main() {
   ensureTempDir();
 
   // Fetch all speeches without video using pagination
-  const speeches = await fetchAllSpeechesWithoutVideo(limit, uploadMode);
+  const speeches = await fetchAllSpeechesWithoutVideo(limit, uploadMode, selectedChannelIds);
   console.log(`✓ Found ${speeches.length} speeches without video\n`);
 
   if (speeches.length === 0) {
