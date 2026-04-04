@@ -33,6 +33,7 @@ export function useShorts(options: UseShortsOptions = {}) {
   const [hasMore, setHasMore] = useState(true);
   const [currentOffset, setCurrentOffset] = useState(0);
   const initialSeenIdsRef = useRef<string[]>([]); // Capture initial state
+  const servedShortsRef = useRef<Set<string>>(new Set()); // Track served shorts
 
   // Capture initial seenShortIds on mount
   useEffect(() => {
@@ -76,9 +77,13 @@ export function useShorts(options: UseShortsOptions = {}) {
     (shorts: Speech[], offset: number = 0, useSeenIds: string[] = seenShortIds) => {
       if (shorts.length === 0) return [];
 
-      // Split into seen and unseen
-      const unseenShorts = shorts.filter((s) => !useSeenIds.includes(s.$id));
-      const seenShorts = shorts.filter((s) => useSeenIds.includes(s.$id));
+      // Split into seen and unseen, excluding already served shorts
+      const unseenShorts = shorts.filter(
+        (s) => !useSeenIds.includes(s.$id) && !servedShortsRef.current.has(s.$id)
+      );
+      const seenShorts = shorts.filter(
+        (s) => useSeenIds.includes(s.$id) && !servedShortsRef.current.has(s.$id)
+      );
 
       console.log(`📊 Shorts pool: ${unseenShorts.length} unseen, ${seenShorts.length} seen`);
 
@@ -95,7 +100,7 @@ export function useShorts(options: UseShortsOptions = {}) {
 
       // Add unseen shorts (priority)
       if (shuffledUnseen.length > 0) {
-        feed.push(...shuffledUnseen.slice(offset, offset + unseenCount));
+        feed.push(...shuffledUnseen.slice(0, unseenCount));
       }
 
       // Fill remaining with seen shorts (rediscovery)
@@ -104,15 +109,19 @@ export function useShorts(options: UseShortsOptions = {}) {
         feed.push(...shuffledSeen.slice(0, remaining));
       }
 
-      // If still not enough, fill with any available
+      // If still not enough, fill with any available (excluding already served)
       if (feed.length < SHORTS_SERVE_SIZE) {
-        const allShuffled = shuffleArray(shorts);
+        const availableShorts = shorts.filter(
+          (s) => !servedShortsRef.current.has(s.$id) && !feed.find((f) => f.$id === s.$id)
+        );
+        const allShuffled = shuffleArray(availableShorts);
         const needed = SHORTS_SERVE_SIZE - feed.length;
-        const additional = allShuffled
-          .filter((s) => !feed.find((f) => f.$id === s.$id))
-          .slice(0, needed);
+        const additional = allShuffled.slice(0, needed);
         feed.push(...additional);
       }
+
+      // Track served shorts
+      feed.forEach((s) => servedShortsRef.current.add(s.$id));
 
       // Final shuffle to mix unseen and seen
       return shuffleArray(feed);
@@ -154,13 +163,21 @@ export function useShorts(options: UseShortsOptions = {}) {
       return;
     }
 
-    setDisplayShorts((prev) => [...prev, ...nextBatch]);
+    // Filter out duplicates before adding to display
+    setDisplayShorts((prev) => {
+      const existingIds = new Set(prev.map(s => s.$id));
+      const uniqueNewShorts = nextBatch.filter(s => !existingIds.has(s.$id));
+      return [...prev, ...uniqueNewShorts];
+    });
     setCurrentOffset((prev) => prev + nextBatch.length);
     setHasMore(nextBatch.length === SHORTS_SERVE_SIZE);
   }, [loading, hasMore, allShorts, currentOffset, buildFeed]);
 
   // Refresh shorts - rebuild with current seenIds
   const refresh = useCallback(async () => {
+    // Clear served shorts on refresh
+    servedShortsRef.current.clear();
+    
     const shorts = await fetchAllShorts();
     const feed = buildFeed(shorts, 0, seenShortIds); // Use current seenIds on refresh
     setDisplayShorts(feed);
