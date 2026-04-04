@@ -40,29 +40,49 @@ export function useShorts(options: UseShortsOptions = {}) {
     initialSeenIdsRef.current = seenShortIds;
   }, []); // Only on mount
 
-  // Fetch all shorts from database
+  // Fetch all shorts from database using batching
   const fetchAllShorts = useCallback(async () => {
     try {
       setLoading(true);
       
-      const queries = [
-        Query.equal("isShort", true),
-        Query.isNotNull("videoId"),
-        Query.notEqual("videoId", ""),
-        Query.limit(SHORTS_BATCH_SIZE),
-      ];
+      let allFetchedShorts: Speech[] = [];
+      let offset = 0;
+      const batchSize = 100; // Fetch in batches of 100
+      let hasMoreBatches = true;
 
-      const response = await databases.listDocuments(
-        config.databaseId,
-        config.speechesCollectionId,
-        queries
-      );
+      while (hasMoreBatches) {
+        const queries = [
+          Query.equal("isShort", true),
+          Query.isNotNull("videoId"),
+          Query.notEqual("videoId", ""),
+          Query.limit(batchSize),
+          Query.offset(offset),
+        ];
 
-      const fetchedShorts = response.documents as unknown as Speech[];
-      setAllShorts(fetchedShorts);
+        const response = await databases.listDocuments(
+          config.databaseId,
+          config.speechesCollectionId,
+          queries
+        );
+
+        const batch = response.documents as unknown as Speech[];
+        allFetchedShorts = [...allFetchedShorts, ...batch];
+
+        console.log(`📦 Fetched batch: ${batch.length} shorts (total: ${allFetchedShorts.length})`);
+
+        // Check if we got fewer documents than the limit (means we've reached the end)
+        if (batch.length < batchSize) {
+          hasMoreBatches = false;
+        } else {
+          offset += batchSize;
+        }
+      }
+
+      console.log(`✅ Total shorts fetched: ${allFetchedShorts.length}`);
+      setAllShorts(allFetchedShorts);
       setError(null);
       
-      return fetchedShorts;
+      return allFetchedShorts;
     } catch (err) {
       console.error("Error fetching shorts:", err);
       setError(err instanceof Error ? err : new Error("Failed to fetch shorts"));
