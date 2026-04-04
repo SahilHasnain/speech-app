@@ -546,9 +546,9 @@ async function ingestSourceSpeeches(databases, sourceId, sourceName, sourceType,
 
       // Duration filter: Only apply if ignoreDuration is false
       if (!ignoreDuration) {
-        // Filter: 1-5 minutes only
-        if (video.duration > 300) {
-          console.log(`   🚫 Filtered: ${video.title} (${video.duration}s > 300s)`);
+        // Filter: 1-20 minutes only
+        if (video.duration > 1200) {
+          console.log(`   🚫 Filtered: ${video.title} (${video.duration}s > 1200s)`);
           filtered++;
           continue;
         }
@@ -704,16 +704,16 @@ async function main() {
 
       // Ask about ignoreDuration setting
       console.log("\n⚙️  Duration Settings:");
-      console.log("   By default, only videos between 1-5 minutes are ingested.");
+      console.log("   By default, only videos between 1-20 minutes are ingested.");
       console.log("   Shorts can be included separately.");
-      const ignoreDurationInput = await question("Ignore duration limit (allow videos > 5 minutes)? (y/n): ");
+      const ignoreDurationInput = await question("Ignore duration limit (allow videos > 20 minutes)? (y/n): ");
       
       sourceInfo.ignoreDuration = ignoreDurationInput.toLowerCase() === "y";
       
       if (sourceInfo.ignoreDuration) {
         console.log("   ✅ Duration limit disabled - will ingest videos of any length (except shorts)");
       } else {
-        console.log("   ✅ Duration limit enabled - will only ingest videos 1-5 minutes");
+        console.log("   ✅ Duration limit enabled - will only ingest videos 1-20 minutes");
       }
 
       const includeShortsInput = await question("Include shorts (< 60 seconds)? (y/n): ");

@@ -4,7 +4,7 @@
  * Local Speech Ingestion Script
  *
  * Fetches Islamic speeches from YouTube channels and stores them in Appwrite.
- * Only ingests videos ≤5 minutes (300 seconds).
+ * Only ingests videos ≤20 minutes (1200 seconds).
  *
  * Usage: node scripts/ingest-speeches.js
  */
@@ -524,9 +524,9 @@ async function ingestSourceSpeeches(databases, existingMap, source, maxResults =
 
       // Duration filter: Only apply if ignoreDuration is false
       if (!ignoreDuration && !isShort) {
-        // Filter: Only speeches ≤5 minutes (300 seconds)
-        if (duration > 300) {
-          console.log(`   🚫 Filtered: ${title} (duration ${duration}s > 300s)`);
+        // Filter: Only speeches ≤20 minutes (1200 seconds)
+        if (duration > 1200) {
+          console.log(`   🚫 Filtered: ${title} (duration ${duration}s > 1200s)`);
           filteredDurationCount++;
           continue;
         }
@@ -689,7 +689,7 @@ async function ingestSpeeches() {
         console.log(`   ✅ New speeches added: ${result.newCount}`);
         console.log(`   🔄 Speeches updated: ${result.updatedCount}`);
         console.log(`   ⏭️  Speeches unchanged: ${result.unchangedCount}`);
-        console.log(`   🚫 Videos filtered by duration (>5min or <1min): ${result.filteredDurationCount}`);
+        console.log(`   🚫 Videos filtered by duration (>20min or <1min): ${result.filteredDurationCount}`);
         console.log(`   ❌ Errors: ${result.errorCount}`);
       }
     }

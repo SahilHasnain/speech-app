@@ -13,7 +13,7 @@
  * Usage: node scripts/delete-channel.js
  */
 
-const { Client, Databases, Query } = require("node-appwrite");
+const { Client, Databases, Storage, Query } = require("node-appwrite");
 const readline = require("readline");
 const path = require("path");
 const fs = require("fs");
@@ -33,6 +33,7 @@ const config = {
   databaseId: process.env.EXPO_PUBLIC_APPWRITE_DATABASE_ID,
   speechesCollectionId: process.env.EXPO_PUBLIC_APPWRITE_SPEECHES_COLLECTION_ID,
   channelsCollectionId: process.env.EXPO_PUBLIC_APPWRITE_CHANNELS_COLLECTION_ID,
+  videoBucketId: process.env.EXPO_PUBLIC_APPWRITE_VIDEO_BUCKET_ID || "video-files",
 };
 
 // Create readline interface
@@ -73,7 +74,10 @@ function initAppwrite() {
     .setProject(config.appwriteProjectId)
     .setKey(config.appwriteApiKey);
 
-  return new Databases(client);
+  return {
+    databases: new Databases(client),
+    storage: new Storage(client),
+  };
 }
 
 // Get channel by document ID
@@ -140,16 +144,43 @@ async function getSpeechesByChannel(databases, youtubeChannelId) {
   }
 }
 
-// Delete a speech document
-async function deleteSpeech(databases, speechId) {
+// Delete video file from storage
+async function deleteVideoFile(storage, videoId) {
   try {
+    await storage.deleteFile(config.videoBucketId, videoId);
+    return true;
+  } catch (error) {
+    // File might not exist or already deleted
+    if (error.code === 404) {
+      return false; // File not found
+    }
+    throw new Error(`Failed to delete video file ${videoId}: ${error.message}`);
+  }
+}
+
+// Delete a speech document and its associated video
+async function deleteSpeech(databases, storage, speech) {
+  try {
+    // Delete video file if it exists
+    let videoDeleted = false;
+    if (speech.videoId) {
+      try {
+        videoDeleted = await deleteVideoFile(storage, speech.videoId);
+      } catch (error) {
+        console.error(`   ⚠️  Warning: Could not delete video file for ${speech.title}: ${error.message}`);
+      }
+    }
+
+    // Delete speech document
     await databases.deleteDocument(
       config.databaseId,
       config.speechesCollectionId,
-      speechId,
+      speech.$id,
     );
+
+    return { videoDeleted };
   } catch (error) {
-    throw new Error(`Failed to delete speech ${speechId}: ${error.message}`);
+    throw new Error(`Failed to delete speech ${speech.$id}: ${error.message}`);
   }
 }
 
@@ -174,7 +205,7 @@ async function main() {
   try {
     validateEnv();
 
-    const databases = initAppwrite();
+    const { databases, storage } = initAppwrite();
 
     // List all channels first
     console.log("📋 Fetching all channels...\n");
@@ -243,9 +274,10 @@ async function main() {
     // Confirm deletion
     console.log("⚠️  WARNING: This action cannot be undone!");
     console.log(`   - ${speeches.length} speech(es) will be deleted`);
-    console.log(`   - Channel "${channel.name}" will be deleted\n`);
+    console.log(`   - Associated video files will be deleted from storage`);
+    console.log(`   - Channel "${channel.name}" can optionally be deleted\n`);
 
-    const confirm = await question("Are you sure you want to delete? Type 'DELETE' to confirm: ");
+    const confirm = await question("Are you sure you want to delete speeches? Type 'DELETE' to confirm: ");
 
     if (confirm !== "DELETE") {
       console.log("\n👋 Deletion cancelled. Goodbye!");
@@ -255,16 +287,24 @@ async function main() {
 
     // Delete speeches
     if (speeches.length > 0) {
-      console.log("\n🗑️  Deleting speeches...");
+      console.log("\n🗑️  Deleting speeches and associated videos...");
 
       let deletedCount = 0;
       let errorCount = 0;
+      let videosDeletedCount = 0;
+      let videosNotFoundCount = 0;
 
       for (const speech of speeches) {
         try {
-          await deleteSpeech(databases, speech.$id);
+          const { videoDeleted } = await deleteSpeech(databases, storage, speech);
           deletedCount++;
-          console.log(`   ✅ Deleted: ${speech.title}`);
+          if (videoDeleted) {
+            videosDeletedCount++;
+            console.log(`   ✅ Deleted: ${speech.title} (+ video file)`);
+          } else {
+            videosNotFoundCount++;
+            console.log(`   ✅ Deleted: ${speech.title} (no video file found)`);
+          }
         } catch (error) {
           errorCount++;
           console.error(`   ❌ Error deleting ${speech.title}: ${error.message}`);
@@ -274,15 +314,27 @@ async function main() {
       console.log("\n═══════════════════════════════════════════════════════════");
       console.log("📊 Speech Deletion Summary:");
       console.log("═══════════════════════════════════════════════════════════");
-      console.log(`   ✅ Successfully deleted: ${deletedCount}`);
+      console.log(`   ✅ Speeches deleted: ${deletedCount}`);
+      console.log(`   🎥 Video files deleted: ${videosDeletedCount}`);
+      console.log(`   ℹ️  Video files not found: ${videosNotFoundCount}`);
       console.log(`   ❌ Errors: ${errorCount}`);
       console.log("═══════════════════════════════════════════════════════════\n");
     }
 
-    // Delete channel
-    console.log("🗑️  Deleting channel...");
-    await deleteChannel(databases, trimmedChannelDocId);
-    console.log(`✅ Channel "${channel.name}" deleted successfully!\n`);
+    // Ask if user wants to delete the channel document
+    console.log("📋 Do you also want to delete the channel document?");
+    console.log(`   Channel: "${channel.name}"`);
+    console.log("   Note: Deleting the channel will remove it from your sources list.\n");
+
+    const deleteChannelConfirm = await question("Delete channel document? (y/n): ");
+
+    if (deleteChannelConfirm.toLowerCase() === "y") {
+      console.log("\n🗑️  Deleting channel...");
+      await deleteChannel(databases, trimmedChannelDocId);
+      console.log(`✅ Channel "${channel.name}" deleted successfully!\n`);
+    } else {
+      console.log(`\n✅ Channel "${channel.name}" kept in database.\n`);
+    }
 
     console.log("✨ Deletion complete!");
     console.log("👋 Goodbye!");

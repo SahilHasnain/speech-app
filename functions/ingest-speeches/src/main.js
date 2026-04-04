@@ -2,7 +2,7 @@
  * Appwrite Function: Speech Ingestion Service
  *
  * Fetches Islamic speeches from YouTube channels and stores them in Appwrite.
- * Only ingests videos ≤5 minutes (300 seconds).
+ * Only ingests videos ≤20 minutes (1200 seconds).
  * Runs on a scheduled basis (cron job) to keep content updated.
  *
  * Environment Variables Required:
@@ -517,10 +517,10 @@ async function processSource(
         }
 
         // Duration filter: Only apply if ignoreDuration is false
-        if (!ignoreDuration) {
-          // Filter: Only speeches ≤5 minutes (300 seconds)
-          if (video.duration > 300) {
-            log(`Filtered: ${video.title} (duration ${video.duration}s > 300s)`);
+        if (!ignoreDuration && video.duration >= 60) {
+          // Filter: Only speeches ≤20 minutes (1200 seconds)
+          if (video.duration > 1200) {
+            log(`Filtered: ${video.title} (duration ${video.duration}s > 1200s)`);
             results.filtered++;
             continue;
           }

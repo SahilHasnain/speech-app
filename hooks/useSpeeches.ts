@@ -91,6 +91,10 @@ export function useSpeeches(
         Query.limit(limit),
         Query.offset(offset),
         Query.isNotNull("videoId"), // Only fetch speeches with uploaded videos
+        Query.or([
+          Query.equal("isShort", false),
+          Query.isNull("isShort")
+        ]), // Exclude shorts at database level
       ];
 
       // Add sorting based on filter
@@ -108,9 +112,7 @@ export function useSpeeches(
         queries
       );
 
-      return (response.documents as unknown as Speech[]).filter(
-        (speech) => (speech as Speech & { isShort?: boolean | null }).isShort !== true
-      );
+      return response.documents as unknown as Speech[];
     },
     []
   );
