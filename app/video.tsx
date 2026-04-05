@@ -127,20 +127,11 @@ export default function VideoScreen() {
         };
     }, []);
 
-    // Load video on mount and autoplay
+    // Load video on mount and reset state
     React.useEffect(() => {
-        setIsLoading(true);
         setVideoPlaying(true);
         setInitialPosition(0);
         lastSavedProgressRef.current = 0;
-
-        const loadingTimeout = setTimeout(() => {
-            setIsLoading(false);
-        }, 5000);
-
-        return () => {
-            clearTimeout(loadingTimeout);
-        };
     }, [videoId]);
 
     // Load saved progress and resume automatically when applicable
