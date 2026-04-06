@@ -16,12 +16,13 @@ const VIDEO_BUCKET_ID = "video-files";
 
 async function getCollectionCount(collectionId: string) {
   try {
+    // Use Appwrite's total count - it's accurate and efficient
     const response = await databases.listDocuments(DATABASE_ID, collectionId, [
       Query.limit(1),
     ]);
     return response.total;
   } catch (error) {
-    console.error(`Error fetching count: ${error}`);
+    console.error(`Error fetching count for ${collectionId}:`, error);
     return 0;
   }
 }
@@ -74,6 +75,7 @@ async function fetchAllChannels() {
 
 async function getChannelSpeechCount(channelId: string) {
   try {
+    // Use Appwrite's total count with query filter
     const response = await databases.listDocuments(
       DATABASE_ID,
       SPEECHES_COLLECTION_ID,
@@ -82,6 +84,24 @@ async function getChannelSpeechCount(channelId: string) {
     return response.total;
   } catch (error) {
     console.error(`Error fetching channel speech count: ${error}`);
+    return 0;
+  }
+}
+
+async function getChannelShortsCount(channelId: string) {
+  try {
+    const response = await databases.listDocuments(
+      DATABASE_ID,
+      SPEECHES_COLLECTION_ID,
+      [
+        Query.equal("channelId", channelId),
+        Query.equal("isShort", true),
+        Query.limit(1),
+      ]
+    );
+    return response.total;
+  } catch (error) {
+    console.error(`Error fetching channel shorts count: ${error}`);
     return 0;
   }
 }
@@ -119,18 +139,19 @@ async function getChannelVideoCount(channelId: string) {
 
 export async function GET() {
   try {
-    // Get collection counts
-    const speechesCount = await getCollectionCount(SPEECHES_COLLECTION_ID);
+    // Get channels count
     const channelsCount = await getCollectionCount(CHANNELS_COLLECTION_ID);
     const videoFilesCount = await getStorageFileCount();
 
     // Get all channels
     const channels = await fetchAllChannels();
 
-    // Get speech and video counts for each channel
+    // Get speech, shorts, and video counts for each channel
     const channelsWithCounts = await Promise.all(
       channels.map(async (channel: any) => {
-        const speechCount = await getChannelSpeechCount(channel.youtubeChannelId);
+        const totalCount = await getChannelSpeechCount(channel.youtubeChannelId);
+        const shortsCount = await getChannelShortsCount(channel.youtubeChannelId);
+        const speechesOnlyCount = totalCount - shortsCount;
         const videoCount = await getChannelVideoCount(channel.youtubeChannelId);
 
         return {
@@ -140,18 +161,37 @@ export async function GET() {
           type: channel.type || "channel",
           ignoreDuration: channel.ignoreDuration || false,
           includeShorts: channel.includeShorts || false,
-          speechCount,
+          totalCount,
+          speechesOnlyCount,
+          shortsCount,
           videoCount,
         };
       })
     );
 
-    // Sort by speech count descending
-    channelsWithCounts.sort((a, b) => b.speechCount - a.speechCount);
+    // Calculate totals by summing all channel counts
+    // This ensures we only count documents that belong to existing channels
+    const totalDocuments = channelsWithCounts.reduce(
+      (total, channel) => total + channel.totalCount,
+      0
+    );
+    const totalSpeeches = channelsWithCounts.reduce(
+      (total, channel) => total + channel.speechesOnlyCount,
+      0
+    );
+    const totalShorts = channelsWithCounts.reduce(
+      (total, channel) => total + channel.shortsCount,
+      0
+    );
+
+    // Sort by total count descending
+    channelsWithCounts.sort((a, b) => b.totalCount - a.totalCount);
 
     return NextResponse.json({
       stats: {
-        speechesCount,
+        totalDocuments,
+        totalSpeeches,
+        totalShorts,
         channelsCount,
         videoFilesCount,
       },

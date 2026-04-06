@@ -22,6 +22,7 @@ export async function DELETE(request: Request) {
     return NextResponse.json({
       success: true,
       deletedSpeeches: result.deletedSpeeches,
+      deletedVideos: result.deletedVideos,
     });
   } catch (error: any) {
     console.error("Error deleting channel:", error);

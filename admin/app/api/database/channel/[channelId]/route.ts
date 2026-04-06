@@ -58,15 +58,25 @@ async function getChannelVideoCount(channelId: string) {
       offset += limit;
     }
 
-    return allSpeeches.length;
+    const totalVideos = allSpeeches.length;
+    const speechVideos = allSpeeches.filter((s) => s.isShort !== true).length;
+    const shortVideos = allSpeeches.filter((s) => s.isShort === true).length;
+
+    return {
+      total: totalVideos,
+      speeches: speechVideos,
+      shorts: shortVideos,
+    };
   } catch (error) {
     console.error(`Error fetching channel video count: ${error}`);
-    return 0;
+    return { total: 0, speeches: 0, shorts: 0 };
   }
 }
 
 function analyzeChannelStats(speeches: any[]) {
   const total = speeches.length;
+  const shorts = speeches.filter((s) => s.isShort === true).length;
+  const speechesOnly = total - shorts;
   const under20Min = speeches.filter((s) => s.duration < 1200).length;
   const over20Min = speeches.filter((s) => s.duration >= 1200).length;
 
@@ -77,6 +87,8 @@ function analyzeChannelStats(speeches: any[]) {
 
   return {
     total,
+    speechesOnly,
+    shorts,
     under20Min,
     over20Min,
     totalDuration,
@@ -109,8 +121,8 @@ export async function GET(
     // Fetch all speeches for this channel
     const speeches = await fetchChannelSpeeches(channelId);
 
-    // Get video count
-    const videoCount = await getChannelVideoCount(channelId);
+    // Get video counts
+    const videoCounts = await getChannelVideoCount(channelId);
 
     // Analyze stats
     const stats = analyzeChannelStats(speeches);
@@ -122,9 +134,13 @@ export async function GET(
       type: channel.type || "channel",
       ignoreDuration: channel.ignoreDuration || false,
       includeShorts: channel.includeShorts || false,
-      speechCount: stats.total,
-      videoCount,
-      documentsWithoutVideo: stats.total - videoCount,
+      totalCount: stats.total,
+      speechesOnlyCount: stats.speechesOnly,
+      shortsCount: stats.shorts,
+      videoCount: videoCounts.total,
+      speechVideoCount: videoCounts.speeches,
+      shortVideoCount: videoCounts.shorts,
+      documentsWithoutVideo: stats.total - videoCounts.total,
       ...stats,
     });
   } catch (error) {

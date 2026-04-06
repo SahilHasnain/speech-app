@@ -3,7 +3,9 @@
 import { useEffect, useState } from "react";
 
 interface DatabaseStats {
-    speechesCount: number;
+    totalDocuments: number;
+    totalSpeeches: number;
+    totalShorts: number;
     channelsCount: number;
     videoFilesCount: number;
 }
@@ -15,12 +17,18 @@ interface ChannelStats {
     type: string;
     ignoreDuration: boolean;
     includeShorts: boolean;
-    speechCount: number;
+    totalCount: number;
+    speechesOnlyCount: number;
+    shortsCount: number;
     videoCount: number;
 }
 
 interface ChannelDetails extends ChannelStats {
     total: number;
+    speechesOnly: number;
+    shorts: number;
+    speechVideoCount: number;
+    shortVideoCount: number;
     under20Min: number;
     over20Min: number;
     totalDuration: number;
@@ -102,13 +110,29 @@ export default function DatabaseInspector() {
             {/* Database Overview */}
             <div className="mb-8">
                 <h2 className="text-xl font-semibold mb-4 text-sky-300">Database Overview</h2>
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
+                    <div className="bg-neutral-800 rounded-lg p-6 border border-neutral-700">
+                        <div className="text-3xl mb-2">📊</div>
+                        <div className="text-2xl font-bold text-white">
+                            {stats?.totalDocuments.toLocaleString()}
+                        </div>
+                        <div className="text-sm text-neutral-400">Total Documents</div>
+                    </div>
+
                     <div className="bg-neutral-800 rounded-lg p-6 border border-neutral-700">
                         <div className="text-3xl mb-2">📹</div>
-                        <div className="text-2xl font-bold text-white">
-                            {stats?.speechesCount.toLocaleString()}
+                        <div className="text-2xl font-bold text-sky-400">
+                            {stats?.totalSpeeches.toLocaleString()}
                         </div>
                         <div className="text-sm text-neutral-400">Speeches</div>
+                    </div>
+
+                    <div className="bg-neutral-800 rounded-lg p-6 border border-neutral-700">
+                        <div className="text-3xl mb-2">🎬</div>
+                        <div className="text-2xl font-bold text-purple-400">
+                            {stats?.totalShorts.toLocaleString()}
+                        </div>
+                        <div className="text-sm text-neutral-400">Shorts</div>
                     </div>
 
                     <div className="bg-neutral-800 rounded-lg p-6 border border-neutral-700">
@@ -144,7 +168,13 @@ export default function DatabaseInspector() {
                                         Type
                                     </th>
                                     <th className="px-6 py-3 text-right text-xs font-medium text-neutral-400 uppercase tracking-wider">
+                                        Total
+                                    </th>
+                                    <th className="px-6 py-3 text-right text-xs font-medium text-neutral-400 uppercase tracking-wider">
                                         Speeches
+                                    </th>
+                                    <th className="px-6 py-3 text-right text-xs font-medium text-neutral-400 uppercase tracking-wider">
+                                        Shorts
                                     </th>
                                     <th className="px-6 py-3 text-right text-xs font-medium text-neutral-400 uppercase tracking-wider">
                                         Videos
@@ -160,8 +190,8 @@ export default function DatabaseInspector() {
                             <tbody className="divide-y divide-neutral-700">
                                 {channels.map((channel) => {
                                     const coverage =
-                                        channel.speechCount > 0
-                                            ? ((channel.videoCount / channel.speechCount) * 100).toFixed(1)
+                                        channel.totalCount > 0
+                                            ? ((channel.videoCount / channel.totalCount) * 100).toFixed(1)
                                             : "0.0";
 
                                     return (
@@ -189,8 +219,14 @@ export default function DatabaseInspector() {
                                                     {channel.type}
                                                 </span>
                                             </td>
-                                            <td className="px-6 py-4 text-right text-sm text-white">
-                                                {channel.speechCount.toLocaleString()}
+                                            <td className="px-6 py-4 text-right text-sm text-white font-semibold">
+                                                {channel.totalCount.toLocaleString()}
+                                            </td>
+                                            <td className="px-6 py-4 text-right text-sm text-sky-400">
+                                                {channel.speechesOnlyCount.toLocaleString()}
+                                            </td>
+                                            <td className="px-6 py-4 text-right text-sm text-purple-400">
+                                                {channel.shortsCount.toLocaleString()}
                                             </td>
                                             <td className="px-6 py-4 text-right text-sm text-white">
                                                 {channel.videoCount.toLocaleString()}
@@ -262,41 +298,71 @@ export default function DatabaseInspector() {
                                 </div>
                             ) : channelDetails ? (
                                 <div className="space-y-6">
-                                    {/* Stats Grid */}
-                                    <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
-                                        <div className="bg-neutral-900 rounded-lg p-4">
-                                            <div className="text-2xl font-bold text-white">
-                                                {channelDetails.total.toLocaleString()}
+                                    {/* Document Stats */}
+                                    <div>
+                                        <h4 className="text-sm font-semibold text-neutral-300 mb-3">
+                                            Document Breakdown
+                                        </h4>
+                                        <div className="grid grid-cols-3 gap-4">
+                                            <div className="bg-neutral-900 rounded-lg p-4">
+                                                <div className="text-2xl font-bold text-white">
+                                                    {channelDetails.total.toLocaleString()}
+                                                </div>
+                                                <div className="text-sm text-neutral-400">Total Documents</div>
                                             </div>
-                                            <div className="text-sm text-neutral-400">Total Documents</div>
-                                        </div>
 
-                                        <div className="bg-neutral-900 rounded-lg p-4">
-                                            <div className="text-2xl font-bold text-green-500">
-                                                {channelDetails.videoCount.toLocaleString()}
+                                            <div className="bg-neutral-900 rounded-lg p-4">
+                                                <div className="text-2xl font-bold text-sky-400">
+                                                    {channelDetails.speechesOnly.toLocaleString()}
+                                                </div>
+                                                <div className="text-sm text-neutral-400">Speeches</div>
                                             </div>
-                                            <div className="text-sm text-neutral-400">Videos in Storage</div>
-                                        </div>
 
+                                            <div className="bg-neutral-900 rounded-lg p-4">
+                                                <div className="text-2xl font-bold text-purple-400">
+                                                    {channelDetails.shorts.toLocaleString()}
+                                                </div>
+                                                <div className="text-sm text-neutral-400">Shorts</div>
+                                            </div>
+                                        </div>
+                                    </div>
+
+                                    {/* Video Stats */}
+                                    <div>
+                                        <h4 className="text-sm font-semibold text-neutral-300 mb-3">
+                                            Video Files in Storage
+                                        </h4>
+                                        <div className="grid grid-cols-3 gap-4">
+                                            <div className="bg-neutral-900 rounded-lg p-4">
+                                                <div className="text-2xl font-bold text-green-500">
+                                                    {channelDetails.videoCount.toLocaleString()}
+                                                </div>
+                                                <div className="text-sm text-neutral-400">Total Videos</div>
+                                            </div>
+
+                                            <div className="bg-neutral-900 rounded-lg p-4">
+                                                <div className="text-2xl font-bold text-sky-400">
+                                                    {channelDetails.speechVideoCount.toLocaleString()}
+                                                </div>
+                                                <div className="text-sm text-neutral-400">Speech Videos</div>
+                                            </div>
+
+                                            <div className="bg-neutral-900 rounded-lg p-4">
+                                                <div className="text-2xl font-bold text-purple-400">
+                                                    {channelDetails.shortVideoCount.toLocaleString()}
+                                                </div>
+                                                <div className="text-sm text-neutral-400">Short Videos</div>
+                                            </div>
+                                        </div>
+                                    </div>
+
+                                    {/* Additional Stats */}
+                                    <div className="grid grid-cols-2 gap-4">
                                         <div className="bg-neutral-900 rounded-lg p-4">
                                             <div className="text-2xl font-bold text-amber-500">
                                                 {channelDetails.documentsWithoutVideo.toLocaleString()}
                                             </div>
-                                            <div className="text-sm text-neutral-400">Without Video</div>
-                                        </div>
-
-                                        <div className="bg-neutral-900 rounded-lg p-4">
-                                            <div className="text-2xl font-bold text-sky-400">
-                                                {channelDetails.under20Min.toLocaleString()}
-                                            </div>
-                                            <div className="text-sm text-neutral-400">&lt; 20 minutes</div>
-                                        </div>
-
-                                        <div className="bg-neutral-900 rounded-lg p-4">
-                                            <div className="text-2xl font-bold text-blue-600">
-                                                {channelDetails.over20Min.toLocaleString()}
-                                            </div>
-                                            <div className="text-sm text-neutral-400">≥ 20 minutes</div>
+                                            <div className="text-sm text-neutral-400">Documents Without Video</div>
                                         </div>
 
                                         <div className="bg-neutral-900 rounded-lg p-4">
@@ -304,6 +370,27 @@ export default function DatabaseInspector() {
                                                 {formatDuration(Math.round(channelDetails.avgDuration))}
                                             </div>
                                             <div className="text-sm text-neutral-400">Avg Duration</div>
+                                        </div>
+                                    </div>
+
+                                    {/* Duration Breakdown */}
+                                    <div className="bg-neutral-900 rounded-lg p-4">
+                                        <h4 className="text-sm font-semibold text-neutral-300 mb-3">
+                                            Duration Breakdown
+                                        </h4>
+                                        <div className="grid grid-cols-2 gap-4">
+                                            <div>
+                                                <div className="text-xl font-bold text-sky-400">
+                                                    {channelDetails.under20Min.toLocaleString()}
+                                                </div>
+                                                <div className="text-sm text-neutral-400">&lt; 20 minutes</div>
+                                            </div>
+                                            <div>
+                                                <div className="text-xl font-bold text-blue-600">
+                                                    {channelDetails.over20Min.toLocaleString()}
+                                                </div>
+                                                <div className="text-sm text-neutral-400">≥ 20 minutes</div>
+                                            </div>
                                         </div>
                                     </div>
 

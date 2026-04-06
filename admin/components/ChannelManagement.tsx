@@ -29,6 +29,7 @@ export default function ChannelManagement() {
   const [showAddModal, setShowAddModal] = useState(false);
   const [showDeleteModal, setShowDeleteModal] = useState(false);
   const [selectedChannel, setSelectedChannel] = useState<Channel | null>(null);
+  const [cleaningUp, setCleaningUp] = useState(false);
 
   useEffect(() => {
     fetchChannels();
@@ -39,11 +40,53 @@ export default function ChannelManagement() {
       setLoading(true);
       const response = await fetch("/api/channels");
       const data = await response.json();
-      setChannels(data.channels);
+
+      if (response.ok && data.channels) {
+        setChannels(data.channels);
+      } else {
+        console.error("Failed to fetch channels:", data);
+        setChannels([]);
+      }
     } catch (error) {
       console.error("Error fetching channels:", error);
+      setChannels([]);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleCleanup = async () => {
+    if (!confirm("This will delete all speeches from channels that no longer exist. Continue?")) {
+      return;
+    }
+
+    try {
+      setCleaningUp(true);
+      const response = await fetch("/api/channels/cleanup", {
+        method: "POST",
+      });
+
+      const data = await response.json();
+
+      if (response.ok) {
+        const totalVideos = (data.deletedVideos || 0) + (data.deletedOrphanedStorageVideos || 0);
+        alert(
+          `Cleanup complete!\n\n` +
+          `📝 Deleted ${data.deletedCount} orphaned speeches\n` +
+          `🎥 Deleted ${totalVideos} orphaned videos\n` +
+          `   • ${data.deletedVideos || 0} from deleted channels\n` +
+          `   • ${data.deletedOrphanedStorageVideos || 0} unreferenced in storage\n` +
+          `📺 From ${data.orphanedChannels.length} deleted channels\n\n` +
+          `Orphaned channels:\n${data.orphanedChannels.join("\n")}`
+        );
+      } else {
+        alert(`Error: ${data.error}`);
+      }
+    } catch (error) {
+      console.error("Error during cleanup:", error);
+      alert("Failed to cleanup orphaned speeches");
+    } finally {
+      setCleaningUp(false);
     }
   };
 
@@ -62,17 +105,22 @@ export default function ChannelManagement() {
         body: JSON.stringify({ youtubeChannelId: selectedChannel.youtubeChannelId }),
       });
 
+      const data = await response.json();
+
       if (response.ok) {
         await fetchChannels();
         setShowDeleteModal(false);
         setSelectedChannel(null);
+        // Show success message
+        const message = `Successfully deleted:\n• Channel: ${selectedChannel.name}\n• Speeches: ${data.deletedSpeeches || 0}\n• Videos: ${data.deletedVideos || 0}`;
+        alert(message);
       } else {
-        const data = await response.json();
-        alert(`Error: ${data.error}`);
+        console.error("Delete error:", data);
+        alert(`Error: ${data.error || "Failed to delete channel"}`);
       }
     } catch (error) {
       console.error("Error deleting channel:", error);
-      alert("Failed to delete channel");
+      alert("Failed to delete channel. Please check the console for details.");
     }
   };
 
@@ -91,12 +139,22 @@ export default function ChannelManagement() {
     <div className="max-w-7xl mx-auto p-8">
       <div className="flex items-center justify-between mb-8">
         <h1 className="text-3xl font-bold">Channel Management</h1>
-        <button
-          onClick={() => setShowAddModal(true)}
-          className="bg-sky-500 hover:bg-sky-600 text-white px-6 py-2 rounded-lg font-medium transition-colors"
-        >
-          + Add Channel
-        </button>
+        <div className="flex gap-3">
+          <button
+            onClick={handleCleanup}
+            disabled={cleaningUp}
+            className="bg-amber-500 hover:bg-amber-600 disabled:bg-neutral-700 disabled:text-neutral-500 text-white px-6 py-2 rounded-lg font-medium transition-colors"
+            title="Delete speeches from channels that no longer exist"
+          >
+            {cleaningUp ? "Cleaning..." : "🧹 Cleanup Orphaned"}
+          </button>
+          <button
+            onClick={() => setShowAddModal(true)}
+            className="bg-sky-500 hover:bg-sky-600 text-white px-6 py-2 rounded-lg font-medium transition-colors"
+          >
+            + Add Channel
+          </button>
+        </div>
       </div>
 
       {/* Channels List */}
@@ -217,8 +275,14 @@ export default function ChannelManagement() {
             <h3 className="text-xl font-semibold text-white mb-4">Delete Channel</h3>
             <p className="text-neutral-300 mb-6">
               Are you sure you want to delete <strong>{selectedChannel.name}</strong>? This will
-              also delete all speeches associated with this channel.
+              delete:
             </p>
+            <ul className="text-neutral-400 mb-6 space-y-1 list-disc list-inside">
+              <li>The channel entry</li>
+              <li>All speeches associated with this channel</li>
+              <li>All video files from storage</li>
+            </ul>
+            <p className="text-red-400 text-sm mb-6">This action cannot be undone!</p>
             <div className="flex gap-3 justify-end">
               <button
                 onClick={() => {
