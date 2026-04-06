@@ -16,7 +16,8 @@
     "upload:video": "node scripts/download-video.js",
     "add:channel": "node scripts/add-channel.js",
     "delete:channel": "node scripts/delete-channel.js",
-    "update:channels:shorts": "node scripts/update-channels-include-shorts.js"
+    "update:channels:shorts": "node scripts/update-channels-include-shorts.js",
+    "inspect:database": "node scripts/inspect-database.js"
   },
   "dependencies": {
     "@expo/vector-icons": "^15.0.3",
