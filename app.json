@@ -10,7 +10,7 @@
     "newArchEnabled": true,
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.islamicspeeches.app"
+      "bundleIdentifier": "com.two_mins_for_islam"
     },
     "android": {
       "versionCode": 1,
@@ -19,7 +19,7 @@
       },
       "edgeToEdgeEnabled": true,
       "predictiveBackGestureEnabled": false,
-      "package": "com.islamicspeeches.app",
+      "package": "com.two_mins_for_islam",
       "permissions": []
     },
     "web": {
