@@ -53,10 +53,12 @@ export default function VideoUpload() {
             setLoading(true);
             const response = await fetch("/api/videos/upload-stats");
             const data = await response.json();
-            setChannels(data.channels);
-            setStats(data.stats);
+            setChannels(Array.isArray(data.channels) ? data.channels : []);
+            setStats(data.stats ?? null);
         } catch (error) {
             console.error("Error fetching data:", error);
+            setChannels([]);
+            setStats(null);
         } finally {
             setLoading(false);
         }
